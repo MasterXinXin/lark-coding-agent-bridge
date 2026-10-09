@@ -484,6 +484,14 @@ describe('Opencode event translator', () => {
       ).toEqual([]);
       expect(translator.isFinished()).toBe(false);
     });
+
+    it('emits a done event with terminationReason=interrupted on interrupted status', () => {
+      const translator = new OpencodeEventTranslator({ sessionId: 's1' });
+      expect(
+        translator.translate({ kind: 'status', sessionID: 's1', status: 'interrupted' }),
+      ).toEqual([{ type: 'done', sessionId: 's1', terminationReason: 'interrupted' }]);
+      expect(translator.isFinished()).toBe(true);
+    });
   });
 
   describe('error', () => {

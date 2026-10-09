@@ -67,11 +67,11 @@ export class OpencodeEventTranslator {
       case 'part':
         return this.translatePart(evt);
       case 'status':
-        if (evt.status === 'idle') {
+        if (evt.status === 'idle' || evt.status === 'interrupted') {
           this.finished = true;
           const out: AgentEvent = {
             type: 'done',
-            terminationReason: 'normal',
+            terminationReason: evt.status === 'interrupted' ? 'interrupted' : 'normal',
           };
           if (this.sessionId) out.sessionId = this.sessionId;
           return [out];

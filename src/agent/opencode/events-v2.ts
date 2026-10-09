@@ -207,6 +207,18 @@ export function createV2EventNormalizer(): (event: unknown) => NormalizedEvent |
           'opencode run failed';
         return { kind: 'error', sessionID, message };
       }
+      // opencode v2.0.x terminates a turn with the `session.execution.*`
+      // family rather than `session.idle` (which newer schema builds emit).
+      // Without mapping `succeeded` to idle, a successfully-finished run
+      // never delivers a terminal event and the bridge hangs forever.
+      case 'session.execution.succeeded': {
+        if (!sessionID) return null;
+        return { kind: 'status', sessionID, status: 'idle' };
+      }
+      case 'session.execution.interrupted': {
+        if (!sessionID) return null;
+        return { kind: 'status', sessionID, status: 'interrupted' };
+      }
 
       // --- permission --------------------------------------------------------
       case 'permission.asked': {

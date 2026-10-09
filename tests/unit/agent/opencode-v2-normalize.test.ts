@@ -165,6 +165,19 @@ describe('normalizeV2Event', () => {
     ).toEqual({ kind: 'error', sessionID: 'ses_1', message: 'provider auth failed' });
   });
 
+  it('maps execution terminal events to status', () => {
+    // opencode v2.0.18 does not emit `session.idle`; a successful turn ends
+    // with `session.execution.succeeded`. Without this mapping the bridge's
+    // run never observes a terminal event and hangs forever.
+    expect(
+      normalize({ type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } }),
+    ).toEqual({ kind: 'status', sessionID: 'ses_1', status: 'idle' });
+    expect(
+      normalize({ type: 'session.execution.interrupted', data: { sessionID: 'ses_1' } }),
+    ).toEqual({ kind: 'status', sessionID: 'ses_1', status: 'interrupted' });
+    expect(normalize({ type: 'session.execution.started', data: { sessionID: 'ses_1' } })).toBeNull();
+  });
+
   it('maps permission.asked to a permission event carrying action + resources', () => {
     expect(
       normalize({
