@@ -11,7 +11,10 @@ import type {
 } from '../types';
 import { OpencodeClient } from './client';
 import { OpencodeServer } from './server';
-import { OpencodeSessionConsumer } from './session-consumer';
+import { OpencodeSessionConsumer, type OpencodeSessionConsumerDeps } from './session-consumer';
+import type { OpencodeSessionClient } from './transport';
+import { OpencodeV2Client } from './transport-v2';
+import { resolveOpencodeApiVersion } from './version';
 
 export interface OpencodeAdapterOptions {
   binary?: string;
@@ -72,8 +75,12 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
   private readonly defaultModel: string | undefined;
   private readonly defaultStopGraceMs: number;
   private readonly permissionTimeoutMs: number;
-  private readonly server: OpencodeServer;
-  private readonly client: OpencodeClient;
+  private server!: OpencodeServer;
+  private client!: OpencodeClient;
+  private v2Client: OpencodeV2Client | undefined;
+  private transport!: OpencodeSessionClient;
+  /** opencode HTTP API generation the current transport speaks. */
+  private apiVersion: 1 | 2 = 1;
   private botIdentity: AgentBotIdentity | undefined;
   /**
    * Whether `server.start()` has already resolved successfully on this
@@ -92,16 +99,61 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
     this.defaultStopGraceMs = opts.stopGraceMs ?? 5000;
     this.permissionTimeoutMs =
       opts.permissionTimeoutMs ?? DEFAULT_PERMISSION_TIMEOUT_MS;
+    // Start on v1; `prepareRun` swaps to v2 once `opencode --version` is known
+    // (or when `LARK_CHANNEL_OPENCODE_API` forces it). Building v1 eagerly keeps
+    // the constructor synchronous and the default path byte-identical.
+    this.configureTransport(1);
+  }
+
+  /**
+   * (Re)build the serve process + session client for the target API version.
+   * v2 generates a fresh server password here (exposed via `server.authHeader`).
+   */
+  private configureTransport(version: 1 | 2): void {
+    this.apiVersion = version;
     this.server = new OpencodeServer({
       port: this.port,
       host: this.host,
       opencodePath: this.binary,
+      apiVersion: version,
     });
-    this.client = new OpencodeClient({
-      baseUrl: this.server.baseUrl,
-      ...(this.defaultAgent ? { agent: this.defaultAgent } : {}),
-      ...(this.defaultModel ? { model: this.defaultModel } : {}),
-    });
+    if (version === 2) {
+      const v2 = new OpencodeV2Client({
+        baseUrl: () => this.server.baseUrl,
+        ...(this.server.authHeader ? { authHeader: this.server.authHeader } : {}),
+        ...(this.defaultAgent ? { defaultAgent: this.defaultAgent } : {}),
+        ...(this.defaultModel ? { defaultModel: this.defaultModel } : {}),
+      });
+      this.v2Client = v2;
+      this.transport = v2;
+    } else {
+      this.v2Client = undefined;
+      this.client = new OpencodeClient({
+        baseUrl: this.server.baseUrl,
+        ...(this.defaultAgent ? { agent: this.defaultAgent } : {}),
+        ...(this.defaultModel ? { model: this.defaultModel } : {}),
+      });
+      this.transport = this.client;
+    }
+    this.started = false;
+  }
+
+  private consumerDeps(): OpencodeSessionConsumerDeps {
+    return {
+      client: this.transport,
+      serverBaseUrl: this.server.baseUrl,
+      defaultAgent: this.defaultAgent,
+      defaultModel: this.defaultModel,
+      defaultStopGraceMs: this.defaultStopGraceMs,
+      permissionTimeoutMs: this.permissionTimeoutMs,
+      botIdentity: this.botIdentity,
+      ...(this.apiVersion === 2 && this.v2Client
+        ? {
+            streamFactory: (opts: { directory?: string }) =>
+              this.v2Client!.createEventStream(opts),
+          }
+        : {}),
+    };
   }
 
   setBotIdentity(identity: AgentBotIdentity): void {
@@ -131,6 +183,14 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
         availability.diagnostic,
       );
     }
+    const apiVersion = resolveOpencodeApiVersion({ version: availability.version });
+    if (apiVersion !== this.apiVersion) {
+      log.info('opencode.adapter', 'api-version', {
+        apiVersion,
+        detected: availability.version ?? null,
+      });
+      this.configureTransport(apiVersion);
+    }
     if (this.started) return;
     try {
       await this.server.start();
@@ -156,15 +216,7 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
       // responsible for explicit teardown via `closeSession(scopeId)`.
       return wrapTurnWithoutSessionClose(turn);
     }
-    const consumer = new OpencodeSessionConsumer({
-      client: this.client,
-      serverBaseUrl: this.server.baseUrl,
-      defaultAgent: this.defaultAgent,
-      defaultModel: this.defaultModel,
-      defaultStopGraceMs: this.defaultStopGraceMs,
-      permissionTimeoutMs: this.permissionTimeoutMs,
-      botIdentity: this.botIdentity,
-    });
+    const consumer = new OpencodeSessionConsumer(this.consumerDeps());
     const turn = consumer.dispatchTurn(opts);
     return wrapTurnWithConsumerCleanup(turn, consumer);
   }
@@ -225,15 +277,7 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
       this.consumersByScope.delete(scopeId);
       log.info('opencode.adapter', 'session-evict-closed', { scope: scopeId });
     }
-    const consumer = new OpencodeSessionConsumer({
-      client: this.client,
-      serverBaseUrl: this.server.baseUrl,
-      defaultAgent: this.defaultAgent,
-      defaultModel: this.defaultModel,
-      defaultStopGraceMs: this.defaultStopGraceMs,
-      permissionTimeoutMs: this.permissionTimeoutMs,
-      botIdentity: this.botIdentity,
-    });
+    const consumer = new OpencodeSessionConsumer(this.consumerDeps());
     this.consumersByScope.set(scopeId, consumer);
     log.info('opencode.adapter', 'session-open', { scope: scopeId });
     return consumer;

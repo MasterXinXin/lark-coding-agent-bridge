@@ -6,9 +6,9 @@ import type {
   AgentRun,
   AgentRunOptions,
 } from '../types';
-import type { OpencodeClient } from './client';
 import { OpencodeEventStream, type NormalizedEvent } from './events';
 import { OpencodeEventTranslator } from './translate';
+import type { NormalizedEventStream, OpencodeSessionClient } from './transport';
 
 /**
  * Per-opencode-session driver.
@@ -30,7 +30,7 @@ import { OpencodeEventTranslator } from './translate';
  * delivered to the next requested turn, not dropped.
  */
 export interface OpencodeSessionConsumerDeps {
-  client: OpencodeClient;
+  client: OpencodeSessionClient;
   serverBaseUrl: string;
   defaultAgent: string | undefined;
   defaultModel: string | undefined;
@@ -38,7 +38,7 @@ export interface OpencodeSessionConsumerDeps {
   permissionTimeoutMs: number;
   botIdentity: AgentBotIdentity | undefined;
   /** Test seam: override stream construction. */
-  streamFactory?: (opts: { baseUrl: string; directory?: string }) => OpencodeEventStream;
+  streamFactory?: (opts: { baseUrl: string; directory?: string }) => NormalizedEventStream;
 }
 
 interface OpencodePendingPermission {
@@ -68,7 +68,7 @@ interface NextTurnWaiter {
 
 export class OpencodeSessionConsumer {
   private readonly deps: OpencodeSessionConsumerDeps;
-  private stream: OpencodeEventStream | null = null;
+  private stream: NormalizedEventStream | null = null;
   private streamStartPromise: Promise<void> | null = null;
   private streamClosed = false;
   private sessionAborted = false;

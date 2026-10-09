@@ -51,8 +51,11 @@ export function createRuntimeAgent(
     });
   }
   if (profileConfig.agentKind === 'opencode') {
+    const rawPort = process.env.LARK_CHANNEL_OPENCODE_PORT;
+    const port = rawPort ? Number.parseInt(rawPort, 10) : undefined;
     return new OpencodeAdapter({
       binary: process.env.LARK_CHANNEL_OPENCODE_BIN ?? 'opencode',
+      ...(port !== undefined && Number.isFinite(port) ? { port } : {}),
     });
   }
   return new ClaudeAdapter({ larkChannel });
