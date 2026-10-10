@@ -35,5 +35,5 @@ export async function gitEnvForAccount(
 
 /** Wrap a runner so every call carries the account env (per-call env wins). */
 export function withGitEnv(run: GitRunner, env: NodeJS.ProcessEnv): GitRunner {
-  return (args, opts = {}) => run(args, { ...opts, env: { ...(opts.env ?? {}), ...env } });
+  return (args, opts = {}) => run(args, { ...opts, env: { ...env, ...(opts.env ?? {}) } });
 }

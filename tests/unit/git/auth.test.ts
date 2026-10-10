@@ -57,9 +57,10 @@ describe('withGitEnv', () => {
       calls.push({ args, env: opts?.env });
       return { code: 0, stdout: '', stderr: '' };
     };
-    const wrapped = withGitEnv(run, { LARK_GIT_TOKEN: 't' });
-    await wrapped(['fetch'], { cwd: '/repo', env: { GIT_TERMINAL_PROMPT: '0' } });
+    const wrapped = withGitEnv(run, { LARK_GIT_TOKEN: 't', GIT_TERMINAL_PROMPT: '0' });
+    await wrapped(['fetch'], { cwd: '/repo', env: { GIT_TERMINAL_PROMPT: '1' } });
     expect(calls[0]!.args).toEqual(['fetch']);
-    expect(calls[0]!.env).toMatchObject({ GIT_TERMINAL_PROMPT: '0', LARK_GIT_TOKEN: 't' });
+    // Account env is merged in, but a per-call env key wins.
+    expect(calls[0]!.env).toMatchObject({ GIT_TERMINAL_PROMPT: '1', LARK_GIT_TOKEN: 't' });
   });
 });
