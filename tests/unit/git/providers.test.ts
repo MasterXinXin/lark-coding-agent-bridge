@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GitAccount } from '../../../src/git/accounts';
-import { listRepos, type FetchLike } from '../../../src/git/providers';
+import { listBranches, listRepos, testConnection, type FetchLike } from '../../../src/git/providers';
 
 function jsonResponse(body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -117,5 +117,38 @@ describe('listRepos', () => {
   it('maps 401 to a token error', async () => {
     const fetchImpl: FetchLike = async () => new Response('{}', { status: 401 });
     await expect(listRepos(github, 'tok', {}, fetchImpl)).rejects.toThrow(/令牌无效或权限不足/);
+  });
+});
+
+describe('listBranches', () => {
+  it('returns branch names for GitHub', async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse([{ name: 'main' }, { name: 'dev' }]);
+    expect(await listBranches(github, 'tok', { fullName: 'acme/api' }, fetchImpl)).toEqual(['main', 'dev']);
+  });
+
+  it('returns [] for unsupported providers instead of throwing', async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse([]);
+    expect(
+      await listBranches({ ...github, provider: 'other', baseUrl: '' }, undefined, { fullName: 'x/y' }, fetchImpl),
+    ).toEqual([]);
+  });
+});
+
+describe('testConnection', () => {
+  it('reports ok with the repo count and username', async () => {
+    const fetchImpl: FetchLike = async () =>
+      jsonResponse([{ id: 1, name: 'a', full_name: 'x/a', default_branch: 'main' }]);
+    expect(await testConnection({ ...github, username: 'octocat' }, 'tok', fetchImpl)).toEqual({
+      ok: true,
+      username: 'octocat',
+      repoCount: 1,
+    });
+  });
+
+  it('maps a 403 to a token error result', async () => {
+    const fetchImpl: FetchLike = async () => new Response('{}', { status: 403 });
+    const result = await testConnection(github, 'tok', fetchImpl);
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/令牌无效或权限不足/);
   });
 });

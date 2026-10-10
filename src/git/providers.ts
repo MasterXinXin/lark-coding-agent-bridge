@@ -168,3 +168,57 @@ export async function listRepos(
       throw new GitProviderError('该平台不支持自动获取仓库列表，请手动填写仓库地址');
   }
 }
+
+function branchNames(data: unknown): string[] {
+  if (!Array.isArray(data)) return [];
+  return data
+    .map((b) => (b && typeof b === 'object' ? (b as { name?: unknown }).name : undefined))
+    .filter((n): n is string => typeof n === 'string' && n.length > 0);
+}
+
+/** List branch names. `other`/unsupported providers return an empty list. */
+export async function listBranches(
+  account: GitAccount,
+  token: string | undefined,
+  repo: { fullName: string },
+  fetchImpl: FetchLike,
+): Promise<string[]> {
+  switch (account.provider) {
+    case 'github': {
+      const url = `${account.baseUrl}/repos/${encodePath(repo.fullName)}/branches?per_page=100`;
+      const res = await request(url, { headers: authHeaders('github', token) }, fetchImpl);
+      return branchNames(await res.json());
+    }
+    case 'gitlab': {
+      const idOrPath = encodeURIComponent(repo.fullName);
+      const url = `${account.baseUrl}/api/v4/projects/${idOrPath}/repository/branches?per_page=100`;
+      const res = await request(url, { headers: authHeaders('gitlab', token) }, fetchImpl);
+      return branchNames(await res.json());
+    }
+    case 'gitea': {
+      const url = `${account.baseUrl}/api/v1/repos/${encodePath(repo.fullName)}/branches?limit=100`;
+      const res = await request(url, { headers: authHeaders('gitea', token) }, fetchImpl);
+      return branchNames(await res.json());
+    }
+    default:
+      return [];
+  }
+}
+
+/** Probe an account: returns ok+repoCount, or ok:false with a mapped message. */
+export async function testConnection(
+  account: GitAccount,
+  token: string | undefined,
+  fetchImpl: FetchLike,
+): Promise<AccountTestResult> {
+  try {
+    const page = await listRepos(account, token, { page: 1 }, fetchImpl);
+    return {
+      ok: true,
+      ...(account.username ? { username: account.username } : {}),
+      repoCount: page.repos.length,
+    };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}
