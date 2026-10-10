@@ -12,7 +12,11 @@ import {
 } from '../../../src/git/accounts';
 
 const cleanups: string[] = [];
+const stores: GitAccountStore[] = [];
 afterEach(async () => {
+  // Let any scheduled persist finish before removing the temp dir, so
+  // writeFileAtomic never races `rm -rf` (which would log spurious ENOENT).
+  await Promise.all(stores.splice(0).map((s) => s.flush().catch(() => undefined)));
   await Promise.all(cleanups.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
@@ -22,6 +26,7 @@ async function makeStore() {
   const file = resolveAppPaths({ rootDir, profile: 'claude' }).gitAccountsFile;
   const storePaths = hostStorePaths(rootDir);
   const store = new GitAccountStore(file, storePaths);
+  stores.push(store);
   await store.load();
   return { rootDir, file, storePaths, store };
 }
