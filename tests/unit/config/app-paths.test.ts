@@ -92,4 +92,10 @@ describe('resolveAppPaths', () => {
     expect(paths.profileDir).toBe(join(root, 'profiles', '助手'));
     expect(paths.profileLockFile).toBe(join(root, 'registry', 'locks', 'profile', '助手.lock'));
   });
+
+  it('exposes per-profile projects and pull-history paths', () => {
+    const p = resolveAppPaths({ rootDir: '/tmp/root', profile: 'work' });
+    expect(p.projectsFile).toBe(join('/tmp/root', 'profiles', 'work', 'projects.json'));
+    expect(p.pullHistoryFile).toBe(join('/tmp/root', 'profiles', 'work', 'pull-history.jsonl'));
+  });
 });
