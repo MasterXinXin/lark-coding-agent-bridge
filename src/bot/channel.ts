@@ -2109,8 +2109,9 @@ async function processAgentStream(
       armOrPauseIdle();
 
       if (evt.type === 'system') {
+        // Persist session metadata, then fall through to reduce() so the card
+        // can pick up the model reported by the agent's init event.
         recordSession(evt);
-        continue;
       }
       if (evt.type === 'permission_request') {
         // Fire-and-forget: we don't want the card-send latency to stall the
@@ -2147,7 +2148,6 @@ async function processAgentStream(
           if (inputTokens !== undefined) reportMetric('tokens_in', inputTokens);
           if (outputTokens !== undefined) reportMetric('tokens_out', outputTokens);
         }
-        continue;
       }
 
       const prevTerminal = state.terminal;

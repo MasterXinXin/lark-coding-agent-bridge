@@ -1346,12 +1346,9 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
                 ctrl.update(renderCard(withDoctorReport(state, doctorReport(echoStatus()))));
               for await (const evt of execution.subscribe()) {
                 if (execution.handle.interrupted) break;
-                // /doctor runs are session-less: skip 'system' so we don't
-                // persist a doctor's sessionId over the user's real session.
-                if (evt.type === 'system') continue;
-                if (evt.type === 'usage') {
-                  continue;
-                }
+                // /doctor runs are session-less; reduce() only reads the model
+                // from system events, so letting them through cannot persist a
+                // doctor's sessionId over the user's real session.
                 if (evt.type === 'text') echoText += evt.delta;
                 if (evt.type === 'final_text') echoText = evt.content;
                 state = reduce(state, evt);
@@ -1375,10 +1372,6 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
       let echoText = '';
       for await (const evt of execution.subscribe()) {
         if (execution.handle.interrupted) break;
-        if (evt.type === 'system') continue;
-        if (evt.type === 'usage') {
-          continue;
-        }
         if (evt.type === 'text') echoText += evt.delta;
         if (evt.type === 'final_text') echoText = evt.content;
         state = reduce(state, evt);

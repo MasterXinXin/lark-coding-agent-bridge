@@ -225,15 +225,18 @@ const USAGE_KEYS = [
 type UsageEvent = Extract<AgentEvent, { type: 'usage' }>;
 
 /**
- * Sum usage across events. Some agents emit usage incrementally, so a plain
- * overwrite would lose earlier counts. `undefined` inputs are skipped so a
- * field only appears in the result once the agent has reported it.
+ * Sum usage across events. Current adapters report a single terminal usage
+ * event per run (claude's `result`, codex's `turn.completed`); opencode emits
+ * none. Summing keeps the door open for adapters that report incrementally,
+ * but because today's values are already cumulative, a RunState must not be
+ * reused across turns without de-duplicating. Non-finite / non-number inputs
+ * are ignored so a malformed upstream field cannot poison the footer.
  */
 function mergeUsage(prev: RunUsage | undefined, evt: UsageEvent): RunUsage {
   const merged: RunUsage = { ...prev };
   for (const key of USAGE_KEYS) {
     const increment = evt[key];
-    if (increment === undefined) continue;
+    if (typeof increment !== 'number' || !Number.isFinite(increment)) continue;
     merged[key] = (merged[key] ?? 0) + increment;
   }
   return merged;
