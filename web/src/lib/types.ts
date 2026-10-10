@@ -194,3 +194,44 @@ export interface ProjectsView {
   projects: ProjectView[];
   schedule: PullSchedule;
 }
+
+// ── global git accounts & provider repos ─────────────────────────────────────
+
+export type GitProvider = "github" | "gitlab" | "gitea" | "other";
+
+export interface GitAccount {
+  id: string;
+  label: string;
+  provider: GitProvider;
+  baseUrl: string;
+  username?: string;
+  /** True when a token is stored; the token itself is never returned. */
+  hasToken: boolean;
+}
+
+export interface AccountsView {
+  accounts: GitAccount[];
+}
+
+export interface RemoteRepo {
+  id: string;
+  name: string;
+  fullName: string;
+  httpsUrl: string;
+  sshUrl: string;
+  defaultBranch: string;
+  private: boolean;
+}
+
+export interface ReposView {
+  repos: RemoteRepo[];
+  hasMore: boolean;
+  page: number;
+}
+
+export interface AccountTestResult {
+  ok: boolean;
+  username?: string;
+  repoCount?: number;
+  message?: string;
+}
