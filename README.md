@@ -321,6 +321,8 @@ The legacy `sandbox` field is still readable for old configs. After the bridge s
 | `~/.lark-channel/profiles/<profile>/sessions.json` | Session state |
 | `~/.lark-channel/profiles/<profile>/sessions.json.catalog.json` | Agent-aware session catalog |
 | `~/.lark-channel/profiles/<profile>/workspaces.json` | Current and named workspace bindings |
+| `~/.lark-channel/profiles/<profile>/projects.json` | Workspace git projects + pull schedule |
+| `~/.lark-channel/profiles/<profile>/pull-history.jsonl` | Recent pull-execution records |
 | `~/.lark-channel/profiles/<profile>/secrets.enc` | Profile-local encrypted secrets |
 | `~/.lark-channel/profiles/<profile>/lark-cli/` | Profile-local lark-cli directory |
 | `~/.lark-channel/profiles/<profile>/media/` | Attachment cache |

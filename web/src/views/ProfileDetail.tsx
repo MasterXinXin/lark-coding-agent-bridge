@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/sonner";
 import { ConfigView } from "./ConfigView";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WorkspaceView } from "./WorkspaceView";
 
 function uptime(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -119,7 +121,18 @@ export function ProfileDetail({ profile, onBack }: { profile: string; onBack: ()
         </CardContent>
       </Card>
 
-      <ConfigView profile={profile} />
+      <Tabs defaultValue="config">
+        <TabsList>
+          <TabsTrigger value="config">配置</TabsTrigger>
+          <TabsTrigger value="workspace">工作空间</TabsTrigger>
+        </TabsList>
+        <TabsContent value="config" className="mt-4">
+          <ConfigView profile={profile} />
+        </TabsContent>
+        <TabsContent value="workspace" className="mt-4">
+          <WorkspaceView profile={profile} />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={confirm} onOpenChange={(o) => !o && setConfirm(false)}>
         <DialogContent>
