@@ -541,7 +541,7 @@ describe('gitEnvForAccount', () => {
     await setSecret(tokenRefFor('gh-sanitize'), 'tok', paths);
     const env = await gitEnvForAccount('gh-sanitize', paths, 'bad name/../x');
     expect(env.GIT_CONFIG_VALUE_0).toContain('username=badname..x');
-    const fallback = await gitEnvForAccount('gh-sanitize', paths, '@@@');
+    const fallback = await gitEnvForAccount('gh-sanitize', paths, '!!!');
     expect(fallback.GIT_CONFIG_VALUE_0).toContain('username=oauth2');
     const absent = await gitEnvForAccount('gh-no-secret', paths);
     expect(absent).toEqual({ GIT_TERMINAL_PROMPT: '0' });
