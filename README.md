@@ -318,6 +318,9 @@ The legacy `sandbox` field is still readable for old configs. After the bridge s
 |---|---|
 | `~/.lark-channel/config.json` | Root config with profiles and active profile |
 | `~/.lark-channel/active-profile` | Last selected profile |
+| `~/.lark-channel/git-accounts.json` | Global Git accounts (tokens live in the host keystore) |
+| `~/.lark-channel/secrets.enc` | Host-level encrypted secrets (Git account tokens) |
+| `~/.lark-channel/.keystore.salt` | Host keystore salt |
 | `~/.lark-channel/profiles/<profile>/sessions.json` | Session state |
 | `~/.lark-channel/profiles/<profile>/sessions.json.catalog.json` | Agent-aware session catalog |
 | `~/.lark-channel/profiles/<profile>/workspaces.json` | Current and named workspace bindings |

@@ -318,6 +318,9 @@ bridge 会检查所选目录存在、是目录，并且不是 `/`、Home 根、�
 |---|---|
 | `~/.lark-channel/config.json` | root config，包含 profiles 和 active profile |
 | `~/.lark-channel/active-profile` | 最近选择的 profile |
+| `~/.lark-channel/git-accounts.json` | 全局 Git 账号（令牌存主机级加密库） |
+| `~/.lark-channel/secrets.enc` | 主机级加密密钥（Git 账号令牌） |
+| `~/.lark-channel/.keystore.salt` | 主机级密钥盐值 |
 | `~/.lark-channel/profiles/<profile>/sessions.json` | 会话状态 |
 | `~/.lark-channel/profiles/<profile>/sessions.json.catalog.json` | agent-aware 会话索引 |
 | `~/.lark-channel/profiles/<profile>/workspaces.json` | 当前和命名工作空间绑定 |
