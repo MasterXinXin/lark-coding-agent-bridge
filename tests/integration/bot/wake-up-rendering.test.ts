@@ -387,7 +387,11 @@ describe('wake-up card rendering through channel.ts', () => {
     expect(dump).toContain('$0.0123');
     // `agentName` + `startedAt` are wired through the caller.
     expect(dump).toContain('Fake Wake Agent');
-    expect(dump).toContain('⏱');
+    // Only the backticked footer chip carries the elapsed-time marker; the
+    // header and idle-timeout notice are not backticked.
+    expect(dump).toContain('`⏱ ');
+    expect(dump).toContain('"header"');
+    expect(dump).toContain('"template"');
   });
 
   it('does not render a wake-up card when nextSpontaneousTurn yields null (consumer closed)', async () => {
