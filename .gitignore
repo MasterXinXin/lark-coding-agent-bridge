@@ -28,3 +28,6 @@ tests-smoke/
 
 # Superpowers brainstorming companion output (local mockups/specs scratch)
 .superpowers/
+
+# Git worktrees used for isolated feature branches
+.worktrees/
