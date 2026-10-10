@@ -2,6 +2,7 @@ import type { LarkChannel } from '@larksuite/channel';
 import type { KnownChat } from '../bot/lark-info';
 import type { MutableProfileState } from '../config/config-ops';
 import type { Controls } from '../commands';
+import type { FetchLike } from '../git/providers';
 import type { ManagedStatus } from '../runtime/supervisor';
 
 /**
@@ -39,6 +40,8 @@ export interface UiServerDeps {
   host?: string;
   /** Bind port; 0 (default) picks an ephemeral port. */
   port?: number;
+  /** Injectable fetch for git-provider calls (tests pass a mock; defaults to global fetch). */
+  fetchImpl?: FetchLike;
 }
 
 export interface UiServerHandle {

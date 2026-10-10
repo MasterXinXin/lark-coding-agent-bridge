@@ -23,6 +23,14 @@ import {
   userLoginStart,
 } from './api';
 import { activateProfile, listBots, listProfiles } from './fleet';
+import {
+  accountsView,
+  branchesView,
+  deleteAccount,
+  reposView,
+  saveAccount,
+  testAccount,
+} from './git-api';
 import { onboardCreate, onboardState, onboardValidate } from './onboard';
 import { finishQrRegistration, qrStatus, startQrRegistration } from './qr-register';
 import {
@@ -140,6 +148,7 @@ async function route(
   const method = req.method ?? 'GET';
   const g = method === 'GET';
   const p = method === 'POST';
+  const d = method === 'DELETE';
   const sup = deps.supervisor;
 
   if (path === '/api/status' && g) {
@@ -332,6 +341,54 @@ async function route(
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'no profile');
     sendJson(res, 200, await setSchedule(profile, deps.rootDir, await readJsonBody(req)));
+    return;
+  }
+
+  // --- global git accounts & provider repos ---
+  if (path === '/api/git/accounts' && g) {
+    sendJson(res, 200, await accountsView(deps.rootDir));
+    return;
+  }
+  if (path === '/api/git/accounts' && p) {
+    sendJson(res, 200, await saveAccount(deps.rootDir, await readJsonBody(req)));
+    return;
+  }
+  if (path === '/api/git/accounts' && d) {
+    const id = url.searchParams.get('id') ?? '';
+    sendJson(res, 200, await deleteAccount(deps.rootDir, { id }));
+    return;
+  }
+  if (path === '/api/git/accounts/test' && p) {
+    sendJson(res, 200, await testAccount(deps.rootDir, await readJsonBody(req), deps.fetchImpl));
+    return;
+  }
+  if (path === '/api/git/repos' && g) {
+    const account = url.searchParams.get('account') ?? undefined;
+    const query = url.searchParams.get('query') ?? undefined;
+    const page = Number(url.searchParams.get('page') ?? '1') || 1;
+    sendJson(
+      res,
+      200,
+      await reposView(
+        deps.rootDir,
+        { ...(account ? { accountId: account } : {}), ...(query ? { query } : {}), page },
+        deps.fetchImpl,
+      ),
+    );
+    return;
+  }
+  if (path === '/api/git/branches' && g) {
+    const account = url.searchParams.get('account') ?? undefined;
+    const repo = url.searchParams.get('repo') ?? undefined;
+    sendJson(
+      res,
+      200,
+      await branchesView(
+        deps.rootDir,
+        { ...(account ? { accountId: account } : {}), ...(repo ? { repo } : {}) },
+        deps.fetchImpl,
+      ),
+    );
     return;
   }
 
