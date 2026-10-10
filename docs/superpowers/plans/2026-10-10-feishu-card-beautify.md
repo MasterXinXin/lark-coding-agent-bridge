@@ -391,9 +391,9 @@ describe('run card beautified renderer', () => {
       { type: 'system', model: 'openai/gpt-5' },
       { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'pwd' } },
     ]);
-    const card = renderCard(state, { agentName: 'Coder', startedAt: 1_000, now: 13_200 }) as CardShape;
+    const card = renderCard(state, { agentName: 'Coder', startedAt: 1_000, now: 8_500 }) as CardShape;
     const dump = JSON.stringify(card.body?.elements ?? []);
-    expect(dump).toContain('⏱ 12.2s');
+    expect(dump).toContain('⏱ 7.5s');
     expect(dump).toContain('🔧 1 次工具');
     expect(dump).toContain('🧩 openai/gpt-5');
   });
@@ -607,7 +607,7 @@ function usageText(state: RunState): string | null {
 }
 ```
 
-`FooterStatus` remains used by `summaryText`'s type, so the import stays.
+After deleting `footerStatus`, `FooterStatus` is no longer referenced anywhere in the file — drop it from the `run-state` type import (keep `Block`, `RunState`, `ToolEntry`).
 
 - [ ] **Step 4: Run the new test to verify it passes**
 
