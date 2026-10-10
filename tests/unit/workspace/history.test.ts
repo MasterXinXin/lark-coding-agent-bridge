@@ -41,10 +41,21 @@ describe('pull history', () => {
 
   it('skips corrupt lines', async () => {
     const path = await tmpFile();
-    await writeFile(path, `not json\n${JSON.stringify(record(1))}\n`, 'utf8');
+    await writeFile(
+      path,
+      `not json\n${JSON.stringify({ ts: 1 })}\n${JSON.stringify({ ts: 'x' })}\n${JSON.stringify(record(1))}\n`,
+      'utf8',
+    );
     const rows = await readPullRecords(path, 10);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.ts).toBe(record(1).ts);
+  });
+
+  it('returns [] for a non-positive limit', async () => {
+    const path = await tmpFile();
+    await appendPullRecord(path, record(1));
+    expect(await readPullRecords(path, 0)).toEqual([]);
+    expect(await readPullRecords(path, -5)).toEqual([]);
   });
 
   it('returns [] when the file is missing', async () => {

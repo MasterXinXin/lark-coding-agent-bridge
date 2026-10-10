@@ -42,8 +42,9 @@ export async function appendPullRecord(path: string, record: PullRecord): Promis
 
 /** Newest-first records, capped at `limit`. Corrupt lines are skipped. */
 export async function readPullRecords(path: string, limit = 50): Promise<PullRecord[]> {
+  if (limit <= 0) return [];
   const all = await readRaw(path);
-  return all.slice(-Math.max(0, limit)).reverse();
+  return all.slice(-limit).reverse();
 }
 
 async function readRaw(path: string): Promise<PullRecord[]> {
