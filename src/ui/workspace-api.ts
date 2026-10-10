@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveAppPaths } from '../config/app-paths';
 import { saveWorkspaceConfig, type MutableProfileState } from '../config/config-ops';
 import { withConfigFileLock } from '../config/profile-store';
+import { log } from '../core/logger';
 import { GitAccountStore, hostStorePaths } from '../git/accounts';
 import { gitEnvForAccount, withGitEnv } from '../git/auth';
 import {
@@ -26,7 +27,14 @@ const run = createGitRunner();
 async function accountUsernames(rootDir?: string): Promise<Map<string, string | undefined>> {
   const appPaths = resolveAppPaths({ rootDir });
   const store = new GitAccountStore(appPaths.gitAccountsFile, hostStorePaths(rootDir));
-  await store.load();
+  try {
+    await store.load();
+  } catch (err) {
+    // A corrupt/unreadable account file must not block project add/pull. Token
+    // injection still works via the keystore; the username falls back to oauth2.
+    log.fail('workspace', err, { step: 'load-git-accounts' });
+    return new Map();
+  }
   const map = new Map<string, string | undefined>();
   for (const account of store.list()) map.set(account.id, account.username);
   return map;

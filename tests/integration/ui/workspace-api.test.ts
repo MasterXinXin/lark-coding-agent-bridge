@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -220,5 +220,27 @@ describe('account-scoped git env', () => {
     expect(pull).toBeTruthy();
     expect(pull!.env?.LARK_GIT_TOKEN).toBe('ghp_secret');
     expect(String(pull!.env?.GIT_CONFIG_VALUE_0)).toContain('password=$LARK_GIT_TOKEN');
+  });
+
+  it('does not fail project add when the account file is corrupt', async () => {
+    const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
+    await writeFile(appPaths.gitAccountsFile, '{ not valid json', 'utf8');
+    const calls: Captured[] = [];
+    const runner = runnerFrom((args, opts) => {
+      calls.push({ args, env: opts?.env });
+      if (args[0] === 'rev-parse' && args.includes('--is-inside-work-tree')) return { code: 128 };
+      return { code: 0 };
+    });
+
+    await addProjects(
+      'claude',
+      rootDir,
+      { projects: [{ repoUrl: 'https://example.com/acme/api.git', name: 'api', branch: 'main' }] },
+      runner,
+    );
+
+    const clone = calls.find((c) => c.args[0] === 'clone');
+    expect(clone).toBeTruthy();
+    expect(clone!.env?.LARK_GIT_TOKEN).toBeUndefined();
   });
 });

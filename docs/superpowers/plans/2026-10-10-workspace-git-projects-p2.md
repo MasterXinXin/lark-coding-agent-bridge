@@ -1810,7 +1810,14 @@ import {
 async function accountUsernames(rootDir?: string): Promise<Map<string, string | undefined>> {
   const appPaths = resolveAppPaths({ rootDir });
   const store = new GitAccountStore(appPaths.gitAccountsFile, hostStorePaths(rootDir));
-  await store.load();
+  try {
+    await store.load();
+  } catch (err) {
+    // A corrupt/unreadable account file must not block project add/pull. Token
+    // injection still works via the keystore; the username falls back to oauth2.
+    log.fail('workspace', err, { step: 'load-git-accounts' });
+    return new Map();
+  }
   const map = new Map<string, string | undefined>();
   for (const account of store.list()) map.set(account.id, account.username);
   return map;
@@ -2019,7 +2026,7 @@ export const apiDelete = <T = unknown>(path: string) => api<T>(path, { method: "
 
 - [ ] **Step 3: 类型检查**
 
-Run: `pnpm --dir web exec tsc --noEmit -p tsconfig.json`
+Run: `pnpm exec tsc --noEmit -p web/tsconfig.json`
 Expected: PASS（无输出）
 
 - [ ] **Step 4: 提交**
@@ -2349,7 +2356,7 @@ function AccountDialog({
 
 - [ ] **Step 2: 类型检查**
 
-Run: `pnpm --dir web exec tsc --noEmit -p tsconfig.json`
+Run: `pnpm exec tsc --noEmit -p web/tsconfig.json`
 Expected: PASS（无输出）
 
 - [ ] **Step 3: 提交**
@@ -2972,7 +2979,7 @@ function DirectoryPicker({
 
 - [ ] **Step 3: 类型检查**
 
-Run: `pnpm --dir web exec tsc --noEmit -p tsconfig.json`
+Run: `pnpm exec tsc --noEmit -p web/tsconfig.json`
 Expected: PASS（无输出）
 
 - [ ] **Step 4: 构建前端确认可打包**
