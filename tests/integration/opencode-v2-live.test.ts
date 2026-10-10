@@ -35,7 +35,9 @@ describe.skipIf(!LIVE)('opencode v2 live', () => {
         authHeader: server.authHeader,
       });
       await server.start();
-      expect(server.authHeader).toMatch(/^Basic /);
+      const authHeader = server.authHeader;
+      if (!authHeader) throw new Error('expected a Basic auth header after start');
+      expect(authHeader).toMatch(/^Basic /);
 
       try {
         const info = await client.createSession('bridge e2e', process.cwd());
@@ -46,7 +48,7 @@ describe.skipIf(!LIVE)('opencode v2 live', () => {
         const { OpenCode } = await import('@opencode/client');
         const sdk = OpenCode.make({
           baseUrl: server.baseUrl,
-          headers: { authorization: server.authHeader },
+          headers: { authorization: authHeader },
         }) as unknown as {
           model: {
             default: (
