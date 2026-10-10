@@ -144,3 +144,53 @@ export interface OnboardState {
   profiles: string[];
   detectedAgents: AgentKind[];
 }
+
+// ── workspace & git projects ─────────────────────────────────────────────────
+
+export interface DirEntry {
+  name: string;
+  path: string;
+}
+
+export interface DirListing {
+  path: string;
+  parent?: string;
+  dirs: DirEntry[];
+  roots?: DirEntry[];
+}
+
+export interface RepoStatus {
+  branch?: string;
+  dirty: boolean;
+  ahead: number;
+  behind: number;
+  hasUpstream: boolean;
+}
+
+export type PullStrategy = "ff-only" | "fetch-only" | "reset-hard";
+
+export interface PullSchedule {
+  enabled: boolean;
+  intervalMinutes: number;
+  strategy: PullStrategy;
+  notifyOnFailure: boolean;
+}
+
+export interface ProjectView {
+  id: string;
+  name: string;
+  repoUrl: string;
+  localPath: string;
+  branch: string;
+  accountId?: string;
+  absolutePath: string;
+  exists: boolean;
+  status: RepoStatus;
+  lastPullAt?: string;
+}
+
+export interface ProjectsView {
+  workspaceDir?: string;
+  projects: ProjectView[];
+  schedule: PullSchedule;
+}
