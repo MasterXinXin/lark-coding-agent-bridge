@@ -209,3 +209,36 @@ export async function savePreferencesConfig(
     state.cfg = runtimeProfileConfig(root, state.profile);
   });
 }
+
+/**
+ * Persist the profile's default working directory (the "workspace root" the
+ * console's directory picker edits), refreshing in-memory state under the
+ * config file lock. Works for both online and disk-only profiles.
+ */
+export async function saveWorkspaceConfig(
+  state: MutableProfileState,
+  workspaceDir: string,
+): Promise<void> {
+  const dir = workspaceDir.trim();
+  if (!dir) throw new Error('工作空间目录不能为空');
+  await withConfigFileLock(state.configPath, async () => {
+    const root = await loadRootConfig(state.configPath);
+    if (!root) {
+      const workspaces = { ...state.profileConfig.workspaces, default: dir };
+      state.profileConfig = { ...state.profileConfig, workspaces };
+      state.cfg = { ...state.cfg, workspaces } as AppConfig & ProfileConfig;
+      await saveConfig(state.cfg, state.configPath);
+      return;
+    }
+    const profile = root.profiles[state.profile];
+    if (!profile) throw new Error(`profile not found: ${state.profile}`);
+    root.profiles[state.profile] = {
+      ...profile,
+      workspaces: { ...profile.workspaces, default: dir },
+    };
+    await saveRootConfig(root, state.configPath);
+    state.profileConfig = root.profiles[state.profile]!;
+    state.cfg = runtimeProfileConfig(root, state.profile);
+  });
+  log.info('config-ops', 'workspace-saved', { profile: state.profile });
+}
