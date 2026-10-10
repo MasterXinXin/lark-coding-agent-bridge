@@ -101,7 +101,7 @@ _运行中…_",
   "header": {
     "template": "wathet",
     "title": {
-      "content": "🤖 Agent 正在调用工具",
+      "content": "⠋ Agent 正在调用工具",
       "tag": "plain_text",
     },
   },
@@ -237,7 +237,7 @@ exports[`run card renderer snapshots > renders active and completed thinking 1`]
   "header": {
     "template": "blue",
     "title": {
-      "content": "🤖 Agent 正在思考",
+      "content": "⠋ Agent 正在思考",
       "tag": "plain_text",
     },
   },
@@ -484,7 +484,7 @@ exports[`run card renderer snapshots > renders initial running state 1`] = `
   "header": {
     "template": "blue",
     "title": {
-      "content": "🤖 Agent 正在思考",
+      "content": "⠋ Agent 正在思考",
       "tag": "plain_text",
     },
   },
@@ -596,7 +596,7 @@ _运行中…_",
   "header": {
     "template": "wathet",
     "title": {
-      "content": "🤖 Agent 正在调用工具",
+      "content": "⠋ Agent 正在调用工具",
       "tag": "plain_text",
     },
   },

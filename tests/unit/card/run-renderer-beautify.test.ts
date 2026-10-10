@@ -14,9 +14,9 @@ interface CardShape {
 
 describe('run card beautified renderer', () => {
   it('adds a stateful header', () => {
-    const card = renderCard(initialState, { agentName: 'Coder' }) as CardShape;
+    const card = renderCard(initialState, { agentName: 'Coder', now: 0 }) as CardShape;
     expect(card.header).toEqual({
-      title: { tag: 'plain_text', content: '🤖 Coder 正在思考' },
+      title: { tag: 'plain_text', content: '⠋ Coder 正在思考' },
       template: 'blue',
     });
 

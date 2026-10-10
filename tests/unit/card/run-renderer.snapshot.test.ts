@@ -120,6 +120,8 @@ function stateFrom(events: AgentEvent[]): RunState {
   return events.reduce((state, event) => reduce(state, event), initialState);
 }
 
+const FIXED_NOW = 0; // header spinner prefix -> '⠋'
+
 function expectCard(state: RunState) {
-  return expect(normalizeCard(renderCard(state)));
+  return expect(normalizeCard(renderCard(state, { now: FIXED_NOW })));
 }

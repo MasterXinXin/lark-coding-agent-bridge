@@ -33,8 +33,9 @@ export interface RunCardRenderOptions {
 }
 
 export function renderCard(state: RunState, options: RunCardRenderOptions = {}): object {
+  const now = options.now ?? Date.now();
   const elements: object[] = [];
-  const header = cardHeader(state, options.agentName);
+  const header = cardHeader(state, options.agentName, now);
 
   if (options.headerBanner) {
     elements.push(noteMd(options.headerBanner));
@@ -65,7 +66,7 @@ export function renderCard(state: RunState, options: RunCardRenderOptions = {}):
     elements.push(noteMd('_（未返回内容）_'));
   }
 
-  elements.push(footerMd(state, options));
+  elements.push(footerMd(state, options, now));
 
   if (state.terminal === 'running') {
     elements.push(stopButton(options));
@@ -227,10 +228,10 @@ function summaryText(state: RunState): string {
   return '思考中';
 }
 
-function footerMd(state: RunState, options: RunCardRenderOptions): object {
+function footerMd(state: RunState, options: RunCardRenderOptions, now: number): object {
   const chips: string[] = [`\`${summaryText(state)}\``];
 
-  const elapsed = elapsedText(options);
+  const elapsed = elapsedText(options, now);
   if (elapsed) chips.push(`\`⏱ ${elapsed}\``);
 
   const toolCount = state.blocks.filter((b) => b.kind === 'tool').length;
@@ -245,9 +246,9 @@ function footerMd(state: RunState, options: RunCardRenderOptions): object {
   return noteMd(lines.join('\n'));
 }
 
-function elapsedText(options: RunCardRenderOptions): string | null {
+function elapsedText(options: RunCardRenderOptions, now: number): string | null {
   if (options.startedAt === undefined) return null;
-  const delta = (options.now ?? Date.now()) - options.startedAt;
+  const delta = now - options.startedAt;
   if (!Number.isFinite(delta)) return null;
   return formatDuration(Math.max(0, delta));
 }
