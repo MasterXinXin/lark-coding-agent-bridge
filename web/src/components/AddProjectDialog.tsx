@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet } from "@/lib/api";
 import type { GitAccount, RemoteRepo, ReposView } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,8 @@ export function AddProjectDialog({
   const [reposError, setReposError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<Record<string, string[]>>({});
+  /** Latest repo-list request id; older in-flight responses are ignored. */
+  const reposReqRef = useRef(0);
 
   const [repoUrl, setRepoUrl] = useState("");
   const [branch, setBranch] = useState("main");
@@ -69,20 +71,27 @@ export function AddProjectDialog({
 
   const loadRepos = useCallback(async (id: string) => {
     if (!id) return;
+    const req = ++reposReqRef.current;
     setReposLoading(true);
     setReposError(null);
     try {
       const v = await apiGet<ReposView>(`/api/git/repos?account=${encodeURIComponent(id)}`);
+      if (req !== reposReqRef.current) return;
       setRepos(v.repos);
     } catch (e) {
+      if (req !== reposReqRef.current) return;
       setReposError(String((e as Error).message ?? e));
     } finally {
-      setReposLoading(false);
+      if (req === reposReqRef.current) setReposLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (open && accountId) void loadRepos(accountId);
+    if (!open) return;
+    // Switching accounts invalidates any prior selection/branch cache.
+    setSelected({});
+    setBranches({});
+    void loadRepos(accountId);
   }, [open, accountId, loadRepos]);
 
   async function loadBranches(repo: RemoteRepo) {
@@ -98,16 +107,18 @@ export function AddProjectDialog({
   }
 
   function toggle(repo: RemoteRepo) {
+    const wasSelected = selected[repo.id] !== undefined;
     setSelected((prev) => {
       const next = { ...prev };
       if (next[repo.id] !== undefined) {
         delete next[repo.id];
       } else {
         next[repo.id] = repo.defaultBranch || "main";
-        void loadBranches(repo);
       }
       return next;
     });
+    // Side effect kept out of the state updater (StrictMode double-invokes it).
+    if (!wasSelected) void loadBranches(repo);
   }
 
   function addFromAccount() {
