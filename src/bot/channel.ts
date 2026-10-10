@@ -23,6 +23,7 @@ import type { AgentAdapter, AgentEvent, WakeUpCapableAdapter } from '../agent/ty
 import { handleCardAction } from '../card/dispatcher';
 import { CallbackAuth } from '../card/callback-auth';
 import { CallbackNonceStore } from '../card/callback-store';
+import { startCardHeartbeat } from '../card/heartbeat';
 import { permissionCard } from '../card/permission-card';
 import { renderCard, type RunCardRenderOptions } from '../card/run-renderer';
 import {
@@ -1269,6 +1270,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     if (replyMode === 'card') {
       let latestState: RunState = initialState;
       let producerStarted = false;
+      let stopHeartbeat: (() => void) | undefined;
       let cardCtrl:
         | { update(next: object | ((current: object) => object)): Promise<void> }
         | undefined;
@@ -1283,7 +1285,17 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
                 if (progress.abandoned()) return;
                 cardCtrl = ctrl;
                 await ctrl.update(renderCard(filterForPrefs(latestState), cardRenderOptions));
-                await renderDone;
+                stopHeartbeat = startCardHeartbeat(() => {
+                  if (cardCtrl) {
+                    void cardCtrl.update(renderCard(filterForPrefs(latestState), cardRenderOptions));
+                  }
+                });
+                try {
+                  await renderDone;
+                } finally {
+                  stopHeartbeat?.();
+                  stopHeartbeat = undefined;
+                }
               },
             },
           },
@@ -1729,6 +1741,7 @@ async function renderWakeUpTurnAsCard(opts: {
 }): Promise<void> {
   let latestState: RunState = initialState;
   let producerStarted = false;
+  let stopHeartbeat: (() => void) | undefined;
   let cardCtrl:
     | { update(next: object | ((current: object) => object)): Promise<void> }
     | undefined;
@@ -1743,7 +1756,17 @@ async function renderWakeUpTurnAsCard(opts: {
             if (progress.abandoned()) return;
             cardCtrl = ctrl;
             await ctrl.update(renderCard(opts.filterForPrefs(latestState), opts.cardRenderOptions));
-            await renderDone;
+            stopHeartbeat = startCardHeartbeat(() => {
+              if (cardCtrl) {
+                void cardCtrl.update(renderCard(opts.filterForPrefs(latestState), opts.cardRenderOptions));
+              }
+            });
+            try {
+              await renderDone;
+            } finally {
+              stopHeartbeat?.();
+              stopHeartbeat = undefined;
+            }
           },
         },
       },
