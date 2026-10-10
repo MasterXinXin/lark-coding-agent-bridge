@@ -33,6 +33,17 @@ import {
   sendHtml,
   sendJson,
 } from './http';
+import {
+  addProjects,
+  projectsView,
+  pullProjects,
+  removeProject,
+  setSchedule,
+  getSchedule,
+  setWorkspaceDir,
+  updateProjectBranch,
+} from './workspace-api';
+import { browseDirectory } from '../workspace/dir-browse';
 import type { Controls } from '../commands';
 import type { UiServerDeps, UiServerHandle } from './types';
 
@@ -263,6 +274,65 @@ async function route(
     const profile = body.profile ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'profile is required');
     sendJson(res, 200, await addBotToChatView(profile, deps.rootDir, body));
+    return;
+  }
+
+  // --- workspace & git projects ---
+  if (path === '/api/workspace/dir' && g) {
+    const target = url.searchParams.get('path') ?? undefined;
+    try {
+      sendJson(res, 200, await browseDirectory(target));
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : String(err));
+    }
+    return;
+  }
+  if (path === '/api/workspace/root' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    sendJson(res, 200, await setWorkspaceDir(profile, deps.rootDir, await readJsonBody(req)));
+    return;
+  }
+  if (path === '/api/projects' && g) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    sendJson(res, 200, await projectsView(profile, deps.rootDir));
+    return;
+  }
+  if (path === '/api/projects' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    sendJson(res, 200, await addProjects(profile, deps.rootDir, await readJsonBody(req)));
+    return;
+  }
+  if (path === '/api/projects/remove' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    sendJson(res, 200, await removeProject(profile, deps.rootDir, await readJsonBody(req)));
+    return;
+  }
+  if (path === '/api/projects/branch' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    sendJson(res, 200, await updateProjectBranch(profile, deps.rootDir, await readJsonBody(req)));
+    return;
+  }
+  if (path === '/api/projects/pull' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    sendJson(res, 200, await pullProjects(profile, deps.rootDir, await readJsonBody(req)));
+    return;
+  }
+  if (path === '/api/schedule' && g) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    sendJson(res, 200, await getSchedule(profile, deps.rootDir));
+    return;
+  }
+  if (path === '/api/schedule' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    sendJson(res, 200, await setSchedule(profile, deps.rootDir, await readJsonBody(req)));
     return;
   }
 
