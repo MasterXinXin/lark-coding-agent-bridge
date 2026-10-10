@@ -12,6 +12,14 @@ export interface ToolEntry {
   title?: string;
 }
 
+export interface RunUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedInputTokens?: number;
+  reasoningOutputTokens?: number;
+  costUsd?: number;
+}
+
 export type Block =
   | { kind: 'text'; content: string; streaming: boolean }
   | { kind: 'tool'; tool: ToolEntry };
@@ -29,6 +37,10 @@ export interface RunState {
   /** Set when terminal === 'idle_timeout' — how long claude was idle before
    * the watchdog gave up (so the message can say "N 分钟无响应"). */
   idleTimeoutMinutes?: number;
+  /** Model reported by the agent's `system` event, if any. */
+  model?: string;
+  /** Aggregated token/cost usage for the run, if the agent reported it. */
+  usage?: RunUsage;
 }
 
 export const initialState: RunState = {
@@ -157,6 +169,14 @@ export function reduce(state: RunState, evt: AgentEvent): RunState {
       };
     }
 
+    case 'system': {
+      return evt.model ? { ...state, model: evt.model } : state;
+    }
+
+    case 'usage': {
+      return { ...state, usage: mergeUsage(state.usage, evt) };
+    }
+
     default:
       return state;
   }
@@ -192,4 +212,29 @@ export function finalizeIfRunning(state: RunState): RunState {
     terminal: 'done',
     footer: null,
   };
+}
+
+const USAGE_KEYS = [
+  'inputTokens',
+  'outputTokens',
+  'cachedInputTokens',
+  'reasoningOutputTokens',
+  'costUsd',
+] as const;
+
+type UsageEvent = Extract<AgentEvent, { type: 'usage' }>;
+
+/**
+ * Sum usage across events. Some agents emit usage incrementally, so a plain
+ * overwrite would lose earlier counts. `undefined` inputs are skipped so a
+ * field only appears in the result once the agent has reported it.
+ */
+function mergeUsage(prev: RunUsage | undefined, evt: UsageEvent): RunUsage {
+  const merged: RunUsage = { ...prev };
+  for (const key of USAGE_KEYS) {
+    const increment = evt[key];
+    if (increment === undefined) continue;
+    merged[key] = (merged[key] ?? 0) + increment;
+  }
+  return merged;
 }
