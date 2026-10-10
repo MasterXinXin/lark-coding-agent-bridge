@@ -11,6 +11,7 @@ import {
   projectsView,
   pullProjects,
   removeProject,
+  resolveProjectDir,
   setWorkspaceDir,
   updateProjectBranch,
 } from '../../../src/ui/workspace-api';
@@ -95,5 +96,24 @@ describe('workspace-api', () => {
     expect(run.results[0]!.result).toBe('failed');
     const view = await projectsView('claude', rootDir);
     expect(view.projects[0]!.lastPullAt).toBeTruthy();
+  });
+
+  it('resolves in-workspace names and rejects real escapes', () => {
+    expect(resolveProjectDir(workspace, 'project')).toBe(join(workspace, 'project'));
+    expect(resolveProjectDir(workspace, '..foo')).toBe(join(workspace, '..foo'));
+    expect(() => resolveProjectDir(workspace, '../escape')).toThrow(HttpError);
+    expect(() => resolveProjectDir(workspace, join(workspace, '..', 'escape'))).toThrow(HttpError);
+  });
+
+  it('lists an absolute-path project that fell outside the workspace without failing', async () => {
+    const origin = await makeOrigin(rootDir);
+    const absLocal = join(workspace, 'absproj');
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'absproj', localPath: absLocal }] });
+    const other = join(rootDir, 'ws2');
+    await mkdir(other, { recursive: true });
+    await setWorkspaceDir('claude', rootDir, { path: other });
+    const view = await projectsView('claude', rootDir);
+    expect(view.projects).toHaveLength(1);
+    expect(view.projects[0]!.exists).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { mkdir } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveAppPaths } from '../config/app-paths';
 import { saveWorkspaceConfig } from '../config/config-ops';
 import {
@@ -17,6 +17,8 @@ import { HttpError } from './http';
 import { loadProfileState } from './api';
 
 const run = createGitRunner();
+
+const ZERO_STATUS: RepoStatus = { branch: undefined, dirty: false, ahead: 0, behind: 0, hasUpstream: false };
 
 export interface ProjectView {
   id: string;
@@ -59,7 +61,7 @@ async function statePaths(profile: string, rootDir?: string) {
 export function resolveProjectDir(workspaceDir: string, localPath: string): string {
   const abs = isAbsolute(localPath) ? resolve(localPath) : resolve(workspaceDir, localPath);
   const rel = relative(resolve(workspaceDir), abs);
-  if (rel.startsWith('..') || isAbsolute(rel)) {
+  if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) {
     throw new HttpError(400, `项目目录必须位于工作空间内：${localPath}`);
   }
   return abs;
@@ -75,11 +77,17 @@ export async function projectsView(profile: string, rootDir?: string): Promise<P
 
   const projects: ProjectView[] = [];
   for (const project of store.list()) {
-    const absolutePath = resolveProjectDir(workspaceDir, project.localPath);
-    const exists = await isGitRepo(run, absolutePath).catch(() => false);
-    const status: RepoStatus = exists
-      ? await repoStatus(run, absolutePath).catch(() => ({ branch: undefined, dirty: false, ahead: 0, behind: 0, hasUpstream: false }))
-      : { branch: undefined, dirty: false, ahead: 0, behind: 0, hasUpstream: false };
+    let absolutePath = '';
+    let exists = false;
+    let status: RepoStatus = ZERO_STATUS;
+    try {
+      absolutePath = resolveProjectDir(workspaceDir, project.localPath);
+      exists = await isGitRepo(run, absolutePath).catch(() => false);
+      if (exists) status = await repoStatus(run, absolutePath).catch(() => ZERO_STATUS);
+    } catch {
+      // Stored path no longer lies within the workspace (e.g. the workspace
+      // root was changed). Surface it as missing instead of failing the view.
+    }
     projects.push({
       ...project,
       absolutePath,
@@ -194,17 +202,22 @@ export async function pullProjects(
 
   const results: PullRunItem[] = [];
   for (const project of targets) {
-    const dir = resolveProjectDir(workspaceDir, project.localPath);
     const startedAt = Date.now();
     let result: PullResult;
     let detail: string;
-    if (!(await isGitRepo(run, dir).catch(() => false))) {
+    try {
+      const dir = resolveProjectDir(workspaceDir, project.localPath);
+      if (!(await isGitRepo(run, dir).catch(() => false))) {
+        result = 'failed';
+        detail = '目录不存在或不是 git 仓库，请重新添加项目';
+      } else {
+        const outcome = await pullRepo(run, dir, schedule.strategy);
+        result = outcome.status;
+        detail = outcome.detail;
+      }
+    } catch (err) {
       result = 'failed';
-      detail = '目录不存在或不是 git 仓库，请重新添加项目';
-    } else {
-      const outcome = await pullRepo(run, dir, schedule.strategy);
-      result = outcome.status;
-      detail = outcome.detail;
+      detail = err instanceof Error ? err.message : String(err);
     }
     const entry: PullRunItem = {
       projectId: project.id,
