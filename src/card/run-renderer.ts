@@ -231,12 +231,12 @@ function footerMd(state: RunState, options: RunCardRenderOptions): object {
   const chips: string[] = [`\`${summaryText(state)}\``];
 
   const elapsed = elapsedText(options);
-  if (elapsed) chips.push(`⏱ ${elapsed}`);
+  if (elapsed) chips.push(`\`⏱ ${elapsed}\``);
 
   const toolCount = state.blocks.filter((b) => b.kind === 'tool').length;
-  if (toolCount > 0) chips.push(`🔧 ${toolCount} 次工具`);
+  if (toolCount > 0) chips.push(`\`🔧 ${toolCount} 次工具\``);
 
-  if (state.model) chips.push(`🧩 ${truncate(state.model, 48)}`);
+  if (state.model) chips.push(`\`🧩 ${truncate(state.model, 48)}\``);
 
   const lines = [chips.join(' · ')];
   const usage = usageText(state);
@@ -246,26 +246,34 @@ function footerMd(state: RunState, options: RunCardRenderOptions): object {
 }
 
 function elapsedText(options: RunCardRenderOptions): string | null {
-  if (!options.startedAt) return null;
-  const now = options.now ?? Date.now();
-  return formatDuration(Math.max(0, now - options.startedAt));
+  if (options.startedAt === undefined) return null;
+  const delta = (options.now ?? Date.now()) - options.startedAt;
+  if (!Number.isFinite(delta)) return null;
+  return formatDuration(Math.max(0, delta));
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  const totalSec = Math.round(ms / 1000);
-  if (totalSec < 60) return `${totalSec}s`;
-  const minutes = Math.floor(totalSec / 60);
-  const seconds = totalSec % 60;
-  return seconds === 0 ? `${minutes}m` : `${minutes}m${seconds}s`;
+export function formatDuration(ms: number): string {
+  const sec = Math.round(ms / 100) / 10;
+  if (sec < 60) return Number.isInteger(sec) ? `${sec}s` : `${sec.toFixed(1)}s`;
+  const wholeSec = Math.round(sec);
+  const minutes = Math.floor(wholeSec / 60);
+  const seconds = wholeSec % 60;
+  if (minutes < 60) return seconds === 0 ? `${minutes}m` : `${minutes}m${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return remMinutes === 0 ? `${hours}h` : `${hours}h${remMinutes}m`;
 }
 
 function usageText(state: RunState): string | null {
   const usage = state.usage;
   if (!usage) return null;
   const parts: string[] = [];
-  if (usage.inputTokens !== undefined || usage.outputTokens !== undefined) {
-    parts.push(`↑ ${usage.inputTokens ?? 0} ↓ ${usage.outputTokens ?? 0}`);
+  if (usage.inputTokens !== undefined && usage.outputTokens !== undefined) {
+    parts.push(`↑ ${usage.inputTokens} ↓ ${usage.outputTokens}`);
+  } else if (usage.inputTokens !== undefined) {
+    parts.push(`↑ ${usage.inputTokens}`);
+  } else if (usage.outputTokens !== undefined) {
+    parts.push(`↓ ${usage.outputTokens}`);
   }
   if (usage.cachedInputTokens !== undefined) parts.push(`缓存 ${usage.cachedInputTokens}`);
   if (usage.costUsd !== undefined) parts.push(`$${usage.costUsd.toFixed(4)}`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderCard } from '../../../src/card/run-renderer.js';
+import { formatDuration, renderCard } from '../../../src/card/run-renderer.js';
 import { initialState, reduce, type RunState } from '../../../src/card/run-state.js';
 import type { AgentEvent } from '../../../src/agent/types.js';
 
@@ -49,6 +49,30 @@ describe('run card beautified renderer', () => {
 
     const noUsage = JSON.stringify((renderCard(initialState) as CardShape).body?.elements ?? []);
     expect(noUsage).not.toContain('缓存');
+  });
+
+  it('does not fabricate a zero when only one token side is present', () => {
+    const onlyIn = stateFrom([
+      { type: 'usage', inputTokens: 42 },
+      { type: 'done', terminationReason: 'normal' },
+    ]);
+    const dump = JSON.stringify((renderCard(onlyIn) as CardShape).body?.elements ?? []);
+    expect(dump).toContain('↑ 42');
+    expect(dump).not.toContain('↓ 0');
+    expect(dump).not.toContain('↑ 42 ↓');
+  });
+
+  it('formats elapsed durations consistently at boundaries', () => {
+    expect(formatDuration(0)).toBe('0s');
+    expect(formatDuration(7_500)).toBe('7.5s');
+    expect(formatDuration(9_999)).toBe('10s');
+    expect(formatDuration(10_000)).toBe('10s');
+    expect(formatDuration(45_000)).toBe('45s');
+    expect(formatDuration(59_999)).toBe('1m');
+    expect(formatDuration(60_000)).toBe('1m');
+    expect(formatDuration(90_000)).toBe('1m30s');
+    expect(formatDuration(3_600_000)).toBe('1h');
+    expect(formatDuration(3_900_000)).toBe('1h5m');
   });
 
   it('colors tool panels by tool type and red on error', () => {
