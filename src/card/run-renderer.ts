@@ -1,5 +1,6 @@
 import { deepMaskEmails } from './mask-email';
-import type { Block, FooterStatus, RunState, ToolEntry } from './run-state';
+import type { Block, RunState, ToolEntry } from './run-state';
+import { cardHeader, toolBorderColor, type ToolBorderColor } from './theme';
 import { toolBodyMd, toolHeaderText } from './tool-render';
 
 const REASONING_MAX = 1500;
@@ -23,10 +24,17 @@ export interface RunCardRenderOptions {
    * background task finished, not a reply to a user message you just sent".
    */
   headerBanner?: string;
+  /** Display name for the card header title (e.g. "opencode"). */
+  agentName?: string;
+  /** Epoch ms when the run started — enables the elapsed-time footer chip. */
+  startedAt?: number;
+  /** Override "now" for deterministic renders (tests). Defaults to Date.now(). */
+  now?: number;
 }
 
 export function renderCard(state: RunState, options: RunCardRenderOptions = {}): object {
   const elements: object[] = [];
+  const header = cardHeader(state, options.agentName);
 
   if (options.headerBanner) {
     elements.push(noteMd(options.headerBanner));
@@ -57,8 +65,9 @@ export function renderCard(state: RunState, options: RunCardRenderOptions = {}):
     elements.push(noteMd('_（未返回内容）_'));
   }
 
+  elements.push(footerMd(state, options));
+
   if (state.terminal === 'running') {
-    if (state.footer) elements.push(footerStatus(state.footer));
     elements.push(stopButton(options));
   }
 
@@ -66,6 +75,10 @@ export function renderCard(state: RunState, options: RunCardRenderOptions = {}):
   // reject the (streamed) card with a 400 EMAIL_ADDRESS — see mask-email.ts.
   return deepMaskEmails({
     schema: '2.0',
+    header: {
+      title: { tag: 'plain_text', content: header.title },
+      template: header.template,
+    },
     config: {
       streaming_mode: state.terminal === 'running',
       summary: { content: summaryText(state) },
@@ -121,7 +134,7 @@ function toolPanel(tool: ToolEntry, expanded: boolean): object {
   return collapsiblePanel({
     title: toolHeaderText(tool),
     expanded,
-    border: tool.status === 'error' ? 'red' : 'grey',
+    border: toolBorderColor(tool),
     body: toolBodyMd(tool) || '_无输出_',
   });
 }
@@ -156,7 +169,7 @@ function collapsedToolSummary(tools: ToolEntry[], finalized: boolean): object {
 interface PanelOpts {
   title: string;
   expanded: boolean;
-  border: 'grey' | 'red' | 'blue';
+  border: ToolBorderColor | 'blue';
   body: string;
 }
 
@@ -204,16 +217,6 @@ function stopButton(options: RunCardRenderOptions): object {
   };
 }
 
-function footerStatus(status: Exclude<FooterStatus, null>): object {
-  const text =
-    status === 'thinking'
-      ? '🧠 正在思考'
-      : status === 'tool_running'
-        ? '🧰 正在调用工具'
-        : '✍️ 正在输出';
-  return noteMd(text);
-}
-
 function summaryText(state: RunState): string {
   if (state.terminal === 'interrupted') return '已中断';
   if (state.terminal === 'idle_timeout') return '已超时';
@@ -222,6 +225,52 @@ function summaryText(state: RunState): string {
   if (state.footer === 'tool_running') return '正在调用工具';
   if (state.footer === 'streaming') return '正在输出';
   return '思考中';
+}
+
+function footerMd(state: RunState, options: RunCardRenderOptions): object {
+  const chips: string[] = [`\`${summaryText(state)}\``];
+
+  const elapsed = elapsedText(options);
+  if (elapsed) chips.push(`⏱ ${elapsed}`);
+
+  const toolCount = state.blocks.filter((b) => b.kind === 'tool').length;
+  if (toolCount > 0) chips.push(`🔧 ${toolCount} 次工具`);
+
+  if (state.model) chips.push(`🧩 ${truncate(state.model, 48)}`);
+
+  const lines = [chips.join(' · ')];
+  const usage = usageText(state);
+  if (usage) lines.push(usage);
+
+  return noteMd(lines.join('\n'));
+}
+
+function elapsedText(options: RunCardRenderOptions): string | null {
+  if (!options.startedAt) return null;
+  const now = options.now ?? Date.now();
+  return formatDuration(Math.max(0, now - options.startedAt));
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const minutes = Math.floor(totalSec / 60);
+  const seconds = totalSec % 60;
+  return seconds === 0 ? `${minutes}m` : `${minutes}m${seconds}s`;
+}
+
+function usageText(state: RunState): string | null {
+  const usage = state.usage;
+  if (!usage) return null;
+  const parts: string[] = [];
+  if (usage.inputTokens !== undefined || usage.outputTokens !== undefined) {
+    parts.push(`↑ ${usage.inputTokens ?? 0} ↓ ${usage.outputTokens ?? 0}`);
+  }
+  if (usage.cachedInputTokens !== undefined) parts.push(`缓存 ${usage.cachedInputTokens}`);
+  if (usage.costUsd !== undefined) parts.push(`$${usage.costUsd.toFixed(4)}`);
+  if (parts.length === 0) return null;
+  return parts.map((part) => `\`${part}\``).join(' · ');
 }
 
 function truncate(s: string, max: number): string {

@@ -38,7 +38,7 @@ exports[`run card renderer snapshots > collapses consecutive tools while preserv
       },
       {
         "border": {
-          "color": "grey",
+          "color": "blue",
           "corner_radius": "5px",
         },
         "elements": [
@@ -70,7 +70,7 @@ _运行中…_",
         "vertical_spacing": "8px",
       },
       {
-        "content": "🧰 正在调用工具",
+        "content": "\`正在调用工具\` · 🔧 3 次工具",
         "tag": "markdown",
         "text_size": "notation",
       },
@@ -96,6 +96,13 @@ _运行中…_",
     "streaming_mode": true,
     "summary": {
       "content": "正在调用工具",
+    },
+  },
+  "header": {
+    "template": "wathet",
+    "title": {
+      "content": "🤖 Agent 正在调用工具",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -139,12 +146,24 @@ exports[`run card renderer snapshots > collapses consecutive tools while preserv
         "tag": "collapsible_panel",
         "vertical_spacing": "8px",
       },
+      {
+        "content": "\`已完成\` · 🔧 3 次工具",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
     "streaming_mode": false,
     "summary": {
       "content": "已完成",
+    },
+  },
+  "header": {
+    "template": "green",
+    "title": {
+      "content": "✅ Agent 已完成",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -187,7 +206,7 @@ exports[`run card renderer snapshots > renders active and completed thinking 1`]
         "vertical_spacing": "8px",
       },
       {
-        "content": "🧠 正在思考",
+        "content": "\`思考中\`",
         "tag": "markdown",
         "text_size": "notation",
       },
@@ -213,6 +232,13 @@ exports[`run card renderer snapshots > renders active and completed thinking 1`]
     "streaming_mode": true,
     "summary": {
       "content": "思考中",
+    },
+  },
+  "header": {
+    "template": "blue",
+    "title": {
+      "content": "🤖 Agent 正在思考",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -258,12 +284,24 @@ exports[`run card renderer snapshots > renders active and completed thinking 2`]
         "content": "final answer",
         "tag": "markdown",
       },
+      {
+        "content": "\`已完成\`",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
     "streaming_mode": false,
     "summary": {
       "content": "已完成",
+    },
+  },
+  "header": {
+    "template": "green",
+    "title": {
+      "content": "✅ Agent 已完成",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -279,12 +317,24 @@ exports[`run card renderer snapshots > renders done, error, interrupted, and idl
         "tag": "markdown",
         "text_size": "notation",
       },
+      {
+        "content": "\`已完成\`",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
     "streaming_mode": false,
     "summary": {
       "content": "已完成",
+    },
+  },
+  "header": {
+    "template": "green",
+    "title": {
+      "content": "✅ Agent 已完成",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -300,12 +350,24 @@ exports[`run card renderer snapshots > renders done, error, interrupted, and idl
         "tag": "markdown",
         "text_size": "notation",
       },
+      {
+        "content": "\`出错\`",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
     "streaming_mode": false,
     "summary": {
       "content": "出错",
+    },
+  },
+  "header": {
+    "template": "red",
+    "title": {
+      "content": "⚠️ Agent 执行失败",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -325,12 +387,24 @@ exports[`run card renderer snapshots > renders done, error, interrupted, and idl
         "tag": "markdown",
         "text_size": "notation",
       },
+      {
+        "content": "\`已中断\`",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
     "streaming_mode": false,
     "summary": {
       "content": "已中断",
+    },
+  },
+  "header": {
+    "template": "grey",
+    "title": {
+      "content": "⏹ Agent 已中断",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -350,12 +424,24 @@ exports[`run card renderer snapshots > renders done, error, interrupted, and idl
         "tag": "markdown",
         "text_size": "notation",
       },
+      {
+        "content": "\`已超时\`",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
     "streaming_mode": false,
     "summary": {
       "content": "已超时",
+    },
+  },
+  "header": {
+    "template": "orange",
+    "title": {
+      "content": "⏱ Agent 已超时（15 分钟无响应）",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -367,7 +453,7 @@ exports[`run card renderer snapshots > renders initial running state 1`] = `
   "body": {
     "elements": [
       {
-        "content": "🧠 正在思考",
+        "content": "\`思考中\`",
         "tag": "markdown",
         "text_size": "notation",
       },
@@ -393,6 +479,13 @@ exports[`run card renderer snapshots > renders initial running state 1`] = `
     "streaming_mode": true,
     "summary": {
       "content": "思考中",
+    },
+  },
+  "header": {
+    "template": "blue",
+    "title": {
+      "content": "🤖 Agent 正在思考",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -437,7 +530,7 @@ exports[`run card renderer snapshots > renders tool running, done, and error sta
     "elements": [
       {
         "border": {
-          "color": "grey",
+          "color": "orange",
           "corner_radius": "5px",
         },
         "elements": [
@@ -472,7 +565,7 @@ _运行中…_",
         "vertical_spacing": "8px",
       },
       {
-        "content": "🧰 正在调用工具",
+        "content": "\`正在调用工具\` · 🔧 1 次工具",
         "tag": "markdown",
         "text_size": "notation",
       },
@@ -500,6 +593,13 @@ _运行中…_",
       "content": "正在调用工具",
     },
   },
+  "header": {
+    "template": "wathet",
+    "title": {
+      "content": "🤖 Agent 正在调用工具",
+      "tag": "plain_text",
+    },
+  },
   "schema": "2.0",
 }
 `;
@@ -510,7 +610,7 @@ exports[`run card renderer snapshots > renders tool running, done, and error sta
     "elements": [
       {
         "border": {
-          "color": "grey",
+          "color": "orange",
           "corner_radius": "5px",
         },
         "elements": [
@@ -547,12 +647,24 @@ pwd
         "tag": "collapsible_panel",
         "vertical_spacing": "8px",
       },
+      {
+        "content": "\`已完成\` · 🔧 1 次工具",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
     "streaming_mode": false,
     "summary": {
       "content": "已完成",
+    },
+  },
+  "header": {
+    "template": "green",
+    "title": {
+      "content": "✅ Agent 已完成",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",
@@ -599,12 +711,24 @@ ENOENT
         "tag": "collapsible_panel",
         "vertical_spacing": "8px",
       },
+      {
+        "content": "\`已完成\` · 🔧 1 次工具",
+        "tag": "markdown",
+        "text_size": "notation",
+      },
     ],
   },
   "config": {
     "streaming_mode": false,
     "summary": {
       "content": "已完成",
+    },
+  },
+  "header": {
+    "template": "green",
+    "title": {
+      "content": "✅ Agent 已完成",
+      "tag": "plain_text",
     },
   },
   "schema": "2.0",

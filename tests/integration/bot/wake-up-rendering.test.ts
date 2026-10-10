@@ -363,8 +363,9 @@ describe('wake-up card rendering through channel.ts', () => {
     //    `nextSpontaneousTurn` path. The wake-up turn yields a system event
     //    (needed by the renderer), a text delta, and a terminal done.
     h.agent.triggerWakeUp('wake-1', [
-      { type: 'system', sessionId: 'ses_wake', model: undefined },
+      { type: 'system', sessionId: 'ses_wake', model: 'openai/gpt-5' },
       { type: 'text', delta: 'background task result' },
+      { type: 'usage', inputTokens: 120, outputTokens: 30, costUsd: 0.0123 },
       { type: 'done', terminationReason: 'normal' },
     ]);
 
@@ -380,6 +381,10 @@ describe('wake-up card rendering through channel.ts', () => {
     expect(dump).toContain('background task result');
     // And the wake-up banner so users can tell this card was unprompted.
     expect(dump).toContain('后台任务完成后由 agent 主动接续');
+    // The run card surfaces the model and token usage in its footer.
+    expect(dump).toContain('🧩 openai/gpt-5');
+    expect(dump).toContain('↑ 120 ↓ 30');
+    expect(dump).toContain('$0.0123');
   });
 
   it('does not render a wake-up card when nextSpontaneousTurn yields null (consumer closed)', async () => {
