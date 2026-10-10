@@ -116,7 +116,7 @@
 
 - **状态**：沿用 `summaryText` 的文案（思考中 / 正在调用工具 / 正在输出 / 已完成 / 已中断 / 已超时 / 出错）。
 - **耗时**：`options.startedAt` 存在时 `now - startedAt`，格式化为 `1.2s` / `45s` / `1m20s`；缺省省略。
-- **工具次数**：`state.blocks` 中 `kind === 'tool'` 的数量（即使 `showToolCalls=false` 过滤了展示，也用过滤前状态统计，见 §7）。
+- **工具次数**：`state.blocks` 中 `kind === 'tool'` 的数量。`showToolCalls=false` 时工具块已被 `filterForPrefs` 过滤，计数为 0，页脚自动省略该 chip。
 - **模型**：`state.model`（来自 `system` 事件）或 `options.model`。
 - **token/缓存/费用**：`state.usage`。
 
@@ -155,7 +155,7 @@ now?: number;
 ### 7.3 调用方（`src/bot/channel.ts`）
 - 构造 `cardRenderOptions` 时补充 `agentName: agent.displayName`、`startedAt: Date.now()`（每次 run 开始时取一次）。
 - `commands/index.ts` 的 `/doctor` 卡片路径同样传入 `agentName`；`startedAt` 可选，不传则不显示耗时。
-- `filterForPrefs` 保持"隐藏工具块"行为；页脚工具次数统计基于**过滤前**的 state。实现方式：`renderCard` 接收 `options.toolCount?: number`，由调用方用原始 state 计算并传入（避免 `renderCard` 收到的是已过滤状态）。若未传则回退为 `state.blocks` 统计。
+- `filterForPrefs` 保持"隐藏工具块"行为；页脚工具次数直接统计 `renderCard` 收到的 state 中的工具块（因此隐藏工具时该 chip 自动省略）。
 
 ### 7.4 `text-renderer.ts`
 `renderText` 不变（markdown/text 模式无 header/页脚）。`toolHeaderText` 的状态图标逻辑不动，因此两种模式天然一致。
