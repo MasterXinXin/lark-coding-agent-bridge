@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { log } from '../core/logger';
 import { writeFileAtomic } from '../platform/atomic-write';
 import type { PullStrategy } from '../git/git-ops';
 
@@ -176,7 +177,9 @@ export class ProjectStore {
       .then(() =>
         writeFileAtomic(this.path, `${JSON.stringify(this.data, null, 2)}\n`, { mode: 0o600 }),
       )
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        log.fail('workspace', err, { step: 'persist' });
+      });
   }
 }
 
