@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
-import type { DirListing, ProjectView, ProjectsView } from "@/lib/types";
+import type { AccountsView, DirListing, GitAccount, ProjectView, ProjectsView } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -15,10 +14,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/sonner";
+import { GitAccountCard } from "@/components/GitAccountCard";
+import { AddProjectDialog } from "@/components/AddProjectDialog";
+import type { AddProjectItem } from "@/components/AddProjectDialog";
 
 export function WorkspaceView({ profile }: { profile: string }) {
   const q = `profile=${encodeURIComponent(profile)}`;
   const [view, setView] = useState<ProjectsView | null>(null);
+  const [accounts, setAccounts] = useState<GitAccount[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -26,12 +29,21 @@ export function WorkspaceView({ profile }: { profile: string }) {
 
   const load = useCallback(
     () =>
-      apiGet<ProjectsView>(`/api/projects?${q}`)
-        .then((v) => { setView(v); setError(null); })
-        .catch((e) => setError(String(e.message ?? e))),
+      Promise.all([
+        apiGet<ProjectsView>(`/api/projects?${q}`),
+        apiGet<AccountsView>("/api/git/accounts"),
+      ])
+        .then(([v, a]) => {
+          setView(v);
+          setAccounts(a.accounts);
+          setError(null);
+        })
+        .catch((e) => setError(String((e as Error).message ?? e))),
     [q],
   );
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   async function setRoot(path: string) {
     setBusy(true);
@@ -42,7 +54,9 @@ export function WorkspaceView({ profile }: { profile: string }) {
       await load();
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function pull(id?: string) {
@@ -53,7 +67,9 @@ export function WorkspaceView({ profile }: { profile: string }) {
       await load();
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function remove(id: string) {
@@ -64,7 +80,9 @@ export function WorkspaceView({ profile }: { profile: string }) {
       await load();
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function setBranch(id: string, branch: string) {
@@ -76,6 +94,20 @@ export function WorkspaceView({ profile }: { profile: string }) {
     }
   }
 
+  async function addItems(items: AddProjectItem[]) {
+    setBusy(true);
+    try {
+      await apiPost(`/api/projects?${q}`, { projects: items });
+      toast.success("已添加并检出");
+      setAddOpen(false);
+      await load();
+    } catch (e) {
+      toast.error(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (error) return <p className="text-destructive text-sm">加载失败：{error}</p>;
   if (!view) return <p className="text-muted-foreground text-sm">加载中…</p>;
 
@@ -84,7 +116,9 @@ export function WorkspaceView({ profile }: { profile: string }) {
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>工作空间目录</CardTitle>
-          <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>更换目录…</Button>
+          <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
+            更换目录…
+          </Button>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm">
@@ -96,19 +130,27 @@ export function WorkspaceView({ profile }: { profile: string }) {
         </CardContent>
       </Card>
 
+      <GitAccountCard onChanged={setAccounts} />
+
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>项目（{view.projects.length}）</CardTitle>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => pull()}>全部拉取</Button>
-            <Button size="sm" onClick={() => setAddOpen(true)}>+ 添加项目</Button>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => pull()}>
+              全部拉取
+            </Button>
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              + 添加项目
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
           {view.projects.length === 0 && (
             <p className="text-sm text-muted-foreground">还没有项目，点「添加项目」填入仓库地址。</p>
           )}
-          {view.projects.map((p) => <ProjectRow key={p.id} project={p} busy={busy} onPull={pull} onRemove={remove} onBranch={setBranch} />)}
+          {view.projects.map((p) => (
+            <ProjectRow key={p.id} project={p} busy={busy} onPull={pull} onRemove={remove} onBranch={setBranch} />
+          ))}
         </CardContent>
       </Card>
 
@@ -116,18 +158,9 @@ export function WorkspaceView({ profile }: { profile: string }) {
       <AddProjectDialog
         open={addOpen}
         onOpenChange={setAddOpen}
+        accounts={accounts}
         busy={busy}
-        onAdd={async (repoUrl, branch) => {
-          setBusy(true);
-          try {
-            await apiPost(`/api/projects?${q}`, { projects: [{ repoUrl, branch }] });
-            toast.success("已添加并检出");
-            setAddOpen(false);
-            await load();
-          } catch (e) {
-            toast.error(String((e as Error).message ?? e));
-          } finally { setBusy(false); }
-        }}
+        onAdd={addItems}
       />
     </div>
   );
@@ -140,7 +173,13 @@ function statusBadge(p: ProjectView) {
   return <Badge variant="success">已最新</Badge>;
 }
 
-function ProjectRow({ project, busy, onPull, onRemove, onBranch }: {
+function ProjectRow({
+  project,
+  busy,
+  onPull,
+  onRemove,
+  onBranch,
+}: {
   project: ProjectView;
   busy: boolean;
   onPull: (id: string) => void;
@@ -148,26 +187,41 @@ function ProjectRow({ project, busy, onPull, onRemove, onBranch }: {
   onBranch: (id: string, branch: string) => void;
 }) {
   const [branch, setBranch] = useState(project.branch);
-  useEffect(() => { setBranch(project.branch); }, [project.branch]);
+  useEffect(() => {
+    setBranch(project.branch);
+  }, [project.branch]);
   return (
     <div className="flex items-center gap-3 rounded-md border px-3 py-2">
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{project.name} {statusBadge(project)}</div>
+        <div className="truncate text-sm font-medium">
+          {project.name} {statusBadge(project)}
+        </div>
         <div className="truncate font-mono text-xs text-muted-foreground">{project.repoUrl}</div>
       </div>
       <Input
         className="h-8 w-[130px]"
         value={branch}
         onChange={(e) => setBranch(e.target.value)}
-        onBlur={() => { if (branch.trim() && branch !== project.branch) onBranch(project.id, branch.trim()); }}
+        onBlur={() => {
+          if (branch.trim() && branch !== project.branch) onBranch(project.id, branch.trim());
+        }}
       />
-      <Button variant="outline" size="sm" disabled={busy} onClick={() => onPull(project.id)}>拉取</Button>
-      <Button variant="ghost" size="sm" disabled={busy} onClick={() => onRemove(project.id)}>移除</Button>
+      <Button variant="outline" size="sm" disabled={busy} onClick={() => onPull(project.id)}>
+        拉取
+      </Button>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={() => onRemove(project.id)}>
+        移除
+      </Button>
     </div>
   );
 }
 
-function DirectoryPicker({ open, onOpenChange, busy, onPick }: {
+function DirectoryPicker({
+  open,
+  onOpenChange,
+  busy,
+  onPick,
+}: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   busy: boolean;
@@ -180,10 +234,12 @@ function DirectoryPicker({ open, onOpenChange, busy, onPick }: {
     setError(null);
     apiGet<DirListing>(`/api/workspace/dir${path ? `?path=${encodeURIComponent(path)}` : ""}`)
       .then(setListing)
-      .catch((e) => setError(String(e.message ?? e)));
+      .catch((e) => setError(String((e as Error).message ?? e)));
   }, []);
 
-  useEffect(() => { if (open) browse(); }, [open, browse]);
+  useEffect(() => {
+    if (open) browse();
+  }, [open, browse]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -196,10 +252,17 @@ function DirectoryPicker({ open, onOpenChange, busy, onPick }: {
         {listing && (
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm">
-              <Button variant="outline" size="sm" onClick={() => listing.parent && browse(listing.parent)} disabled={!listing.parent}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => listing.parent && browse(listing.parent)}
+                disabled={!listing.parent}
+              >
                 ↑ 上一级
               </Button>
-              <span className="truncate font-mono text-xs text-muted-foreground">{listing.path || "此电脑"}</span>
+              <span className="truncate font-mono text-xs text-muted-foreground">
+                {listing.path || "此电脑"}
+              </span>
             </div>
             <div className="max-h-[46vh] divide-y overflow-y-auto rounded-md border">
               {(listing.roots ?? listing.dirs).map((d) => (
@@ -215,50 +278,17 @@ function DirectoryPicker({ open, onOpenChange, busy, onPick }: {
                 <p className="px-3 py-2 text-xs text-muted-foreground">（没有子目录）</p>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">已选：<span className="font-mono">{listing.path || "—"}</span></p>
+            <p className="text-xs text-muted-foreground">
+              已选：<span className="font-mono">{listing.path || "—"}</span>
+            </p>
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>取消</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            取消
+          </Button>
           <Button onClick={() => listing?.path && onPick(listing.path)} disabled={busy || !listing?.path}>
             选择此目录
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function AddProjectDialog({ open, onOpenChange, busy, onAdd }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  busy: boolean;
-  onAdd: (repoUrl: string, branch: string) => void;
-}) {
-  const [repoUrl, setRepoUrl] = useState("");
-  const [branch, setBranch] = useState("main");
-  useEffect(() => { if (open) { setRepoUrl(""); setBranch("main"); } }, [open]);
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>添加项目</DialogTitle>
-          <DialogDescription>填入仓库地址与分支，保存后会 clone 到工作空间目录下。</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label>仓库地址</Label>
-            <Input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://… 或 git@…" />
-          </div>
-          <div className="space-y-1.5">
-            <Label>分支</Label>
-            <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>取消</Button>
-          <Button onClick={() => onAdd(repoUrl.trim(), branch.trim() || "main")} disabled={busy || !repoUrl.trim()}>
-            添加
           </Button>
         </DialogFooter>
       </DialogContent>
