@@ -385,6 +385,9 @@ describe('wake-up card rendering through channel.ts', () => {
     expect(dump).toContain('🧩 openai/gpt-5');
     expect(dump).toContain('↑ 120 ↓ 30');
     expect(dump).toContain('$0.0123');
+    // `agentName` + `startedAt` are wired through the caller.
+    expect(dump).toContain('Fake Wake Agent');
+    expect(dump).toContain('⏱');
   });
 
   it('does not render a wake-up card when nextSpontaneousTurn yields null (consumer closed)', async () => {

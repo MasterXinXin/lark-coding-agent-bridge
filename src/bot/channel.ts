@@ -1155,20 +1155,24 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     if (getShowToolCalls(controls.cfg)) return state;
     return { ...state, blocks: state.blocks.filter((b) => b.kind !== 'tool') };
   };
-  const cardRenderOptions = callbackAuth
-    ? {
-        signCallback: (action: string) =>
-          callbackAuth.sign({
-            runId: execution.runId,
-            scope,
-            chatId,
-            operatorOpenId: firstMsg.senderId,
-            action,
-            policyFingerprint: flow.policy.policyFingerprint,
-            ttlMs: 24 * 60 * 60 * 1000,
-          }),
-      }
-    : {};
+  const cardRenderOptions: RunCardRenderOptions = {
+    agentName: deps.agent.displayName,
+    startedAt: Date.now(),
+    ...(callbackAuth
+      ? {
+          signCallback: (action: string) =>
+            callbackAuth.sign({
+              runId: execution.runId,
+              scope,
+              chatId,
+              operatorOpenId: firstMsg.senderId,
+              action,
+              policyFingerprint: flow.policy.policyFingerprint,
+              ttlMs: 24 * 60 * 60 * 1000,
+            }),
+        }
+      : {}),
+  };
 
   // For non-card modes Claude's output doesn't surface visually until either
   // a first streamed token (markdown mode) or the whole run ends (text mode).
@@ -1604,6 +1608,8 @@ async function watchScopeWakeups(opts: {
       };
       const cardRenderOptions: RunCardRenderOptions = {
         headerBanner: '🔔 _后台任务完成后由 agent 主动接续_',
+        agentName: opts.agent.displayName,
+        startedAt: Date.now(),
         ...(opts.callbackAuth
           ? {
               signCallback: (action: string) =>

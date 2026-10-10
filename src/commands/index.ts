@@ -1330,6 +1330,8 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
     return;
   }
 
+  const doctorCardOptions = { agentName: ctx.agent.displayName, startedAt: Date.now() };
+
   try {
     if (isP2p) {
       // Streaming card path — operator is the only viewer in p2p.
@@ -1337,13 +1339,21 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
         ctx.msg.chatId,
         {
           card: {
-            initial: renderCard(withDoctorReport(initialState, doctorReport('pending'))),
+            initial: renderCard(
+              withDoctorReport(initialState, doctorReport('pending')),
+              doctorCardOptions,
+            ),
             producer: async (ctrl) => {
               let state: RunState = initialState;
               let echoText = '';
               const echoStatus = (): string => formatDoctorEchoStatus(echoText, state);
               const flush = (): Promise<void> =>
-                ctrl.update(renderCard(withDoctorReport(state, doctorReport(echoStatus()))));
+                ctrl.update(
+                  renderCard(
+                    withDoctorReport(state, doctorReport(echoStatus())),
+                    doctorCardOptions,
+                  ),
+                );
               for await (const evt of execution.subscribe()) {
                 if (execution.handle.interrupted) break;
                 // /doctor runs are session-less; reduce() only reads the model
@@ -1384,6 +1394,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
       await ctx.channel.send(ctx.msg.senderId, {
         card: renderCard(
           withDoctorReport(state, doctorReport(formatDoctorEchoStatus(echoText, state))),
+          doctorCardOptions,
         ),
       });
     }
