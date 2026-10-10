@@ -46,12 +46,12 @@
 2. **headerBanner**（保留）：wake-up 提示 markdown note，文案不变。
 3. **推理折叠面板**（保留）：`🧠` 标题，`grey` 边框，运行中展开、结束后折叠。
 4. **过程区**（按工具数量分支，见 §5）：
-   - 工具 ≤2：每个工具一个独立彩色面板（最新运行中的展开，其余折叠）。
+   - 工具 ≤2：每个工具一个独立彩色面板（沿用既有行为，默认折叠）。
    - 工具 >2 运行中：折叠的"过程 · N 步"单面板 + 最新运行中工具独立面板。
    - 工具 >2 已结束：折叠的"过程 · N 步（已结束）"单面板，正文逐行列出各工具。
 5. **正文 markdown**：agent 流式输出（按 block 顺序，保留现有分组逻辑）。
 6. **终态提示**（保留）：中断 / 超时 / 出错 / 空内容。
-7. **分隔线 + 页脚**（新增两行元信息，见 §6）。
+7. **页脚**（新增两行元信息，见 §6）。
 8. **终止按钮**（保留，运行中显示，`signCallback` 逻辑不变）。
 
 > 说明：不把推理与工具合并进单一"时间线"面板。当前 `run-state` 将推理存为整体字符串、工具存为有序 blocks，真正的时序交错需要改动归约语义，收益有限、回归面大。本方案保留"推理面板 + 过程区"两段式，仅做配色与元信息增强。
@@ -96,7 +96,7 @@
 
 沿用 `groupBlocks` 的分组，细化为：
 
-- `tools.length < COLLAPSE_TOOL_THRESHOLD (=3)`：每个工具 `toolPanel(tool, expanded = status==='running')`，边框按 §4.2。
+- `tools.length < COLLAPSE_TOOL_THRESHOLD (=3)`：每个工具 `toolPanel(tool, expanded = false)`（沿用既有行为），边框按 §4.2。
 - `finalized && tools.length >= 3`：单个 `collapsedToolSummary(tools, finalized=true)`。
 - `running && tools.length >= 3`：`collapsedToolSummary(prior, false)` + 最新工具 `toolPanel(latest, true)`。
 
@@ -117,7 +117,7 @@
 - **状态**：沿用 `summaryText` 的文案（思考中 / 正在调用工具 / 正在输出 / 已完成 / 已中断 / 已超时 / 出错）。
 - **耗时**：`options.startedAt` 存在时 `now - startedAt`，格式化为 `1.2s` / `45s` / `1m20s`；缺省省略。
 - **工具次数**：`state.blocks` 中 `kind === 'tool'` 的数量。`showToolCalls=false` 时工具块已被 `filterForPrefs` 过滤，计数为 0，页脚自动省略该 chip。
-- **模型**：`state.model`（来自 `system` 事件）或 `options.model`。
+- **模型**：`state.model`（来自 `system` 事件）。
 - **token/缓存/费用**：`state.usage`。
 
 终端态页脚同样显示（耗时定格为结束时值），但不再显示终止按钮。
