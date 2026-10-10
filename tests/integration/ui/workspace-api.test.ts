@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { createRootConfig, saveRootConfig, writeActiveProfile } from '../../../src/config/profile-store';
 import { HttpError } from '../../../src/ui/http';
+import { loadProfileState } from '../../../src/ui/api';
 import {
   addProjects,
   projectsView,
@@ -117,5 +118,26 @@ describe('workspace-api', { timeout: 30_000 }, () => {
     const view = await projectsView('claude', rootDir);
     expect(view.projects).toHaveLength(1);
     expect(view.projects[0]!.exists).toBe(false);
+  });
+
+  it('serializes concurrent adds without losing projects', async () => {
+    const a = join(rootDir, 'a');
+    const b = join(rootDir, 'b');
+    await mkdir(a, { recursive: true });
+    await mkdir(b, { recursive: true });
+    const o1 = await makeOrigin(a);
+    const o2 = await makeOrigin(b);
+    await Promise.all([
+      addProjects('claude', rootDir, { projects: [{ repoUrl: o1, name: 'one' }] }),
+      addProjects('claude', rootDir, { projects: [{ repoUrl: o2, name: 'two' }] }),
+    ]);
+    const view = await projectsView('claude', rootDir);
+    expect(view.projects.map((p) => p.name).sort()).toEqual(['one', 'two']);
+  });
+
+  it('applies a workspace change to the provided live state', async () => {
+    const state = await loadProfileState('claude', rootDir);
+    await setWorkspaceDir('claude', rootDir, { path: workspace }, state);
+    expect(state.profileConfig.workspaces.default).toBe(await realpath(workspace));
   });
 });

@@ -122,12 +122,12 @@ async function handle(
 async function resolveTargetState(
   deps: UiServerDeps,
   url: URL,
-): Promise<{ state: MutableProfileState; live: boolean; controls?: Controls }> {
+): Promise<{ profile: string; state: MutableProfileState; live: boolean; controls?: Controls }> {
   const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
   if (!profile) throw new HttpError(400, 'no profile');
   const controls = deps.supervisor.controlsFor(profile);
-  if (controls) return { state: controls, live: true, controls };
-  return { state: await loadProfileState(profile, deps.rootDir), live: false };
+  if (controls) return { profile, state: controls, live: true, controls };
+  return { profile, state: await loadProfileState(profile, deps.rootDir), live: false };
 }
 
 async function route(
@@ -288,9 +288,8 @@ async function route(
     return;
   }
   if (path === '/api/workspace/root' && p) {
-    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
-    if (!profile) throw new HttpError(400, 'no profile');
-    sendJson(res, 200, await setWorkspaceDir(profile, deps.rootDir, await readJsonBody(req)));
+    const { profile, state } = await resolveTargetState(deps, url);
+    sendJson(res, 200, await setWorkspaceDir(profile, deps.rootDir, await readJsonBody(req), state));
     return;
   }
   if (path === '/api/projects' && g) {

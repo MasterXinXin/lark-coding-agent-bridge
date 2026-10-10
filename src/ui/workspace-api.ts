@@ -1,7 +1,8 @@
 import { mkdir } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveAppPaths } from '../config/app-paths';
-import { saveWorkspaceConfig } from '../config/config-ops';
+import { saveWorkspaceConfig, type MutableProfileState } from '../config/config-ops';
+import { withConfigFileLock } from '../config/profile-store';
 import {
   createGitRunner,
   ensureCheckout,
@@ -57,6 +58,26 @@ async function statePaths(profile: string, rootDir?: string) {
   return { appPaths, state, workspaceDir, store };
 }
 
+/**
+ * Serialize project-list mutations for a profile behind the projects-file lock
+ * so concurrent console requests can't lose updates, then hand the freshly
+ * loaded store to `fn`.
+ */
+async function withProjectStore<T>(
+  profile: string,
+  rootDir: string | undefined,
+  fn: (store: ProjectStore, workspaceDir: string) => Promise<T>,
+): Promise<T> {
+  const appPaths = resolveAppPaths({ rootDir, profile });
+  const state = await loadProfileState(profile, rootDir);
+  const workspaceDir = state.profileConfig.workspaces.default ?? appPaths.defaultWorkspaceDir;
+  return withConfigFileLock(appPaths.projectsFile, async () => {
+    const store = new ProjectStore(appPaths.projectsFile);
+    await store.load();
+    return fn(store, workspaceDir);
+  });
+}
+
 /** Resolve a project's checkout path and refuse one that escapes the workspace. */
 export function resolveProjectDir(workspaceDir: string, localPath: string): string {
   const abs = isAbsolute(localPath) ? resolve(localPath) : resolve(workspaceDir, localPath);
@@ -104,43 +125,45 @@ export async function addProjects(
   rootDir: string | undefined,
   body: unknown,
 ): Promise<ProjectsView> {
-  const { workspaceDir, store } = await statePaths(profile, rootDir);
   const raw = body as { projects?: unknown };
   const items = Array.isArray(raw?.projects) ? raw.projects : [];
   if (items.length === 0) throw new HttpError(400, 'projects is required');
-  await mkdir(workspaceDir, { recursive: true });
 
-  for (const item of items) {
-    const input = item as { repoUrl?: unknown; branch?: unknown; name?: unknown; localPath?: unknown; accountId?: unknown };
-    const repoUrl = typeof input.repoUrl === 'string' ? input.repoUrl.trim() : '';
-    if (!repoUrl) throw new HttpError(400, '仓库地址不能为空');
-    const name = (typeof input.name === 'string' && input.name.trim()) || deriveName(repoUrl);
-    if (!name) throw new HttpError(400, '项目名不能为空');
-    // Default the checkout folder to the project name so the stored localPath
-    // and the directory we clone into are always the same value.
-    const localPath = (typeof input.localPath === 'string' && input.localPath.trim()) || name;
-    const dir = resolveProjectDir(workspaceDir, localPath);
-    let entry: ProjectEntry;
-    try {
-      entry = store.add({
-        repoUrl,
-        name,
-        localPath,
-        ...(typeof input.branch === 'string' ? { branch: input.branch } : {}),
-        ...(typeof input.accountId === 'string' ? { accountId: input.accountId } : {}),
-      });
-    } catch (err) {
-      throw new HttpError(400, err instanceof Error ? err.message : String(err));
+  await withProjectStore(profile, rootDir, async (store, workspaceDir) => {
+    await mkdir(workspaceDir, { recursive: true });
+
+    for (const item of items) {
+      const input = item as { repoUrl?: unknown; branch?: unknown; name?: unknown; localPath?: unknown; accountId?: unknown };
+      const repoUrl = typeof input.repoUrl === 'string' ? input.repoUrl.trim() : '';
+      if (!repoUrl) throw new HttpError(400, '仓库地址不能为空');
+      const name = (typeof input.name === 'string' && input.name.trim()) || deriveName(repoUrl);
+      if (!name) throw new HttpError(400, '项目名不能为空');
+      // Default the checkout folder to the project name so the stored localPath
+      // and the directory we clone into are always the same value.
+      const localPath = (typeof input.localPath === 'string' && input.localPath.trim()) || name;
+      const dir = resolveProjectDir(workspaceDir, localPath);
+      let entry: ProjectEntry;
+      try {
+        entry = store.add({
+          repoUrl,
+          name,
+          localPath,
+          ...(typeof input.branch === 'string' ? { branch: input.branch } : {}),
+          ...(typeof input.accountId === 'string' ? { accountId: input.accountId } : {}),
+        });
+      } catch (err) {
+        throw new HttpError(400, err instanceof Error ? err.message : String(err));
+      }
+      try {
+        await ensureCheckout(run, { repoUrl: entry.repoUrl, dir, branch: entry.branch });
+      } catch (err) {
+        store.remove(entry.id);
+        await store.flush().catch(() => undefined);
+        throw new HttpError(400, err instanceof Error ? err.message : String(err));
+      }
     }
-    try {
-      await ensureCheckout(run, { repoUrl: entry.repoUrl, dir, branch: entry.branch });
-    } catch (err) {
-      store.remove(entry.id);
-      await store.flush();
-      throw new HttpError(400, err instanceof Error ? err.message : String(err));
-    }
-  }
-  await store.flush();
+    await store.flush();
+  });
   return projectsView(profile, rootDir);
 }
 
@@ -149,10 +172,11 @@ export async function removeProject(
   rootDir: string | undefined,
   body: unknown,
 ): Promise<ProjectsView> {
-  const { store } = await statePaths(profile, rootDir);
   const id = readId(body);
-  if (!store.remove(id)) throw new HttpError(404, `项目不存在：${id}`);
-  await store.flush();
+  await withProjectStore(profile, rootDir, async (store) => {
+    if (!store.remove(id)) throw new HttpError(404, `项目不存在：${id}`);
+    await store.flush();
+  });
   return projectsView(profile, rootDir);
 }
 
@@ -161,15 +185,17 @@ export async function updateProjectBranch(
   rootDir: string | undefined,
   body: unknown,
 ): Promise<ProjectsView> {
-  const { store } = await statePaths(profile, rootDir);
   const raw = body as { branch?: unknown };
   const branch = typeof raw?.branch === 'string' ? raw.branch : '';
-  try {
-    store.updateBranch(readId(body), branch);
-  } catch (err) {
-    throw new HttpError(400, err instanceof Error ? err.message : String(err));
-  }
-  await store.flush();
+  const id = readId(body);
+  await withProjectStore(profile, rootDir, async (store) => {
+    try {
+      store.updateBranch(id, branch);
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : String(err));
+    }
+    await store.flush();
+  });
   return projectsView(profile, rootDir);
 }
 
@@ -177,14 +203,19 @@ export async function setWorkspaceDir(
   profile: string,
   rootDir: string | undefined,
   body: unknown,
+  liveState?: MutableProfileState,
 ): Promise<ProjectsView> {
   const raw = body as { path?: unknown };
   const path = typeof raw?.path === 'string' ? raw.path.trim() : '';
   if (!path) throw new HttpError(400, 'path is required');
-  const { state } = await statePaths(profile, rootDir);
+  const state = liveState ?? (await loadProfileState(profile, rootDir));
   const listing = await browseDirectory(path).catch(() => undefined);
   if (!listing) throw new HttpError(400, `目录不存在或不可访问：${path}`);
-  await saveWorkspaceConfig(state, listing.path);
+  try {
+    await saveWorkspaceConfig(state, listing.path);
+  } catch (err) {
+    throw new HttpError(400, err instanceof Error ? err.message : String(err));
+  }
   return projectsView(profile, rootDir);
 }
 
@@ -247,11 +278,12 @@ export async function setSchedule(
   rootDir: string | undefined,
   body: unknown,
 ): Promise<PullSchedule> {
-  const { store } = await statePaths(profile, rootDir);
   const raw = (body && typeof body === 'object' ? body : {}) as Partial<PullSchedule>;
-  const next = store.setSchedule(raw);
-  await store.flush();
-  return next;
+  return withProjectStore(profile, rootDir, async (store) => {
+    const next = store.setSchedule(raw);
+    await store.flush();
+    return next;
+  });
 }
 
 function readId(body: unknown): string {

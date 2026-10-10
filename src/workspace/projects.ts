@@ -179,7 +179,12 @@ export class ProjectStore {
       )
       .catch((err: unknown) => {
         log.fail('workspace', err, { step: 'persist' });
+        throw err;
       });
+    // The chain is fire-and-forget until someone awaits `flush()`; keep the
+    // rejection handled here so an unawaited failure can't crash the process,
+    // while an awaiting `flush()` still observes it.
+    void this.saving.catch(() => undefined);
   }
 }
 
