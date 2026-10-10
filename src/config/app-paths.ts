@@ -17,6 +17,9 @@ export interface AppPaths {
   workspacesFile: string;
   projectsFile: string;
   pullHistoryFile: string;
+  gitAccountsFile: string;
+  hostSecretsFile: string;
+  hostKeystoreSaltFile: string;
   secretsFile: string;
   keystoreSaltFile: string;
   secretsGetterScript: string;
@@ -62,6 +65,9 @@ export function resolveAppPaths(opts: ResolveAppPathsOptions = {}): AppPaths {
     workspacesFile: join(profileDir, 'workspaces.json'),
     projectsFile: join(profileDir, 'projects.json'),
     pullHistoryFile: join(profileDir, 'pull-history.jsonl'),
+    gitAccountsFile: join(rootDir, 'git-accounts.json'),
+    hostSecretsFile: join(rootDir, 'secrets.enc'),
+    hostKeystoreSaltFile: join(rootDir, '.keystore.salt'),
     secretsFile: join(profileDir, 'secrets.enc'),
     keystoreSaltFile: join(profileDir, '.keystore.salt'),
     secretsGetterScript: join(rootDir, 'secrets-getter'),

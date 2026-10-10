@@ -98,4 +98,11 @@ describe('resolveAppPaths', () => {
     expect(p.projectsFile).toBe(join('/tmp/root', 'profiles', 'work', 'projects.json'));
     expect(p.pullHistoryFile).toBe(join('/tmp/root', 'profiles', 'work', 'pull-history.jsonl'));
   });
+
+  it('exposes host-level git account and keystore paths', () => {
+    const p = resolveAppPaths({ rootDir: '/tmp/root', profile: 'work' });
+    expect(p.gitAccountsFile).toBe(join('/tmp/root', 'git-accounts.json'));
+    expect(p.hostSecretsFile).toBe(join('/tmp/root', 'secrets.enc'));
+    expect(p.hostKeystoreSaltFile).toBe(join('/tmp/root', '.keystore.salt'));
+  });
 });
