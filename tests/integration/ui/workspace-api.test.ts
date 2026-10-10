@@ -3,8 +3,11 @@ import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resolveAppPaths } from '../../../src/config/app-paths';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { createRootConfig, saveRootConfig, writeActiveProfile } from '../../../src/config/profile-store';
+import type { GitRunner, GitRunOptions } from '../../../src/git/git-ops';
+import { saveAccount } from '../../../src/ui/git-api';
 import { HttpError } from '../../../src/ui/http';
 import { loadProfileState } from '../../../src/ui/api';
 import {
@@ -16,6 +19,7 @@ import {
   setWorkspaceDir,
   updateProjectBranch,
 } from '../../../src/ui/workspace-api';
+import { ProjectStore } from '../../../src/workspace/projects';
 
 const app = { id: 'cli_test', secret: 's', tenant: 'feishu' as const };
 let rootDir: string;
@@ -139,5 +143,82 @@ describe('workspace-api', { timeout: 30_000 }, () => {
     const state = await loadProfileState('claude', rootDir);
     await setWorkspaceDir('claude', rootDir, { path: workspace }, state);
     expect(state.profileConfig.workspaces.default).toBe(await realpath(workspace));
+  });
+});
+
+type Captured = { args: string[]; env?: NodeJS.ProcessEnv };
+
+function runnerFrom(
+  handler: (args: string[], opts?: GitRunOptions) => { code: number; stdout?: string; stderr?: string },
+): GitRunner {
+  return async (args, opts) => {
+    const r = handler(args, opts);
+    return { code: r.code, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+  };
+}
+
+describe('account-scoped git env', () => {
+  it('injects the account token into git for project checkout', async () => {
+    const { accounts } = await saveAccount(rootDir, {
+      label: 'GitHub',
+      provider: 'github',
+      baseUrl: 'https://api.github.com',
+      username: 'octocat',
+      token: 'ghp_secret',
+    });
+    const id = accounts[0]!.id;
+    const calls: Captured[] = [];
+    const runner = runnerFrom((args, opts) => {
+      calls.push({ args, env: opts?.env });
+      if (args[0] === 'rev-parse' && args.includes('--is-inside-work-tree')) return { code: 128 };
+      return { code: 0 };
+    });
+
+    await addProjects(
+      'claude',
+      rootDir,
+      { projects: [{ repoUrl: 'https://example.com/acme/api.git', name: 'api', branch: 'main', accountId: id }] },
+      runner,
+    );
+
+    const clone = calls.find((c) => c.args[0] === 'clone');
+    expect(clone).toBeTruthy();
+    expect(clone!.env?.LARK_GIT_TOKEN).toBe('ghp_secret');
+    expect(clone!.env?.GIT_TERMINAL_PROMPT).toBe('0');
+    expect(clone!.env?.GIT_CONFIG_KEY_0).toBe('credential.helper');
+    expect(String(clone!.env?.GIT_CONFIG_VALUE_0)).toContain('username=octocat');
+  });
+
+  it('injects the account token into git for pull', async () => {
+    const { accounts } = await saveAccount(rootDir, {
+      label: 'GitHub',
+      provider: 'github',
+      baseUrl: 'https://api.github.com',
+      token: 'ghp_secret',
+    });
+    const id = accounts[0]!.id;
+    const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
+    const store = new ProjectStore(appPaths.projectsFile);
+    await store.load();
+    store.add({ repoUrl: 'https://example.com/acme/api.git', name: 'api', accountId: id });
+    await store.flush();
+
+    const calls: Captured[] = [];
+    const runner = runnerFrom((args, opts) => {
+      calls.push({ args, env: opts?.env });
+      if (args[0] === 'rev-parse' && args.includes('--is-inside-work-tree')) return { code: 0, stdout: 'true\n' };
+      if (args[0] === 'rev-parse' && args.includes('--abbrev-ref')) return { code: 0, stdout: 'main\n' };
+      if (args[0] === 'rev-list') return { code: 0, stdout: '0\t0\n' };
+      if (args[0] === 'status') return { code: 0, stdout: '' };
+      if (args[0] === 'pull') return { code: 0, stdout: 'Already up to date.\n' };
+      return { code: 0 };
+    });
+
+    await pullProjects('claude', rootDir, {}, runner);
+
+    const pull = calls.find((c) => c.args[0] === 'pull');
+    expect(pull).toBeTruthy();
+    expect(pull!.env?.LARK_GIT_TOKEN).toBe('ghp_secret');
+    expect(String(pull!.env?.GIT_CONFIG_VALUE_0)).toContain('password=$LARK_GIT_TOKEN');
   });
 });

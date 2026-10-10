@@ -3,12 +3,15 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveAppPaths } from '../config/app-paths';
 import { saveWorkspaceConfig, type MutableProfileState } from '../config/config-ops';
 import { withConfigFileLock } from '../config/profile-store';
+import { GitAccountStore, hostStorePaths } from '../git/accounts';
+import { gitEnvForAccount, withGitEnv } from '../git/auth';
 import {
   createGitRunner,
   ensureCheckout,
   isGitRepo,
   repoStatus,
   pullRepo,
+  type GitRunner,
   type RepoStatus,
 } from '../git/git-ops';
 import { appendPullRecord, readPullRecords, type PullResult } from '../workspace/history';
@@ -18,6 +21,16 @@ import { HttpError } from './http';
 import { loadProfileState } from './api';
 
 const run = createGitRunner();
+
+/** Usernames for all accounts (used to build the credential helper). */
+async function accountUsernames(rootDir?: string): Promise<Map<string, string | undefined>> {
+  const appPaths = resolveAppPaths({ rootDir });
+  const store = new GitAccountStore(appPaths.gitAccountsFile, hostStorePaths(rootDir));
+  await store.load();
+  const map = new Map<string, string | undefined>();
+  for (const account of store.list()) map.set(account.id, account.username);
+  return map;
+}
 
 const ZERO_STATUS: RepoStatus = { branch: undefined, dirty: false, ahead: 0, behind: 0, hasUpstream: false };
 
@@ -124,10 +137,12 @@ export async function addProjects(
   profile: string,
   rootDir: string | undefined,
   body: unknown,
+  runner: GitRunner = run,
 ): Promise<ProjectsView> {
   const raw = body as { projects?: unknown };
   const items = Array.isArray(raw?.projects) ? raw.projects : [];
   if (items.length === 0) throw new HttpError(400, 'projects is required');
+  const usernames = await accountUsernames(rootDir);
 
   await withProjectStore(profile, rootDir, async (store, workspaceDir) => {
     await mkdir(workspaceDir, { recursive: true });
@@ -154,8 +169,16 @@ export async function addProjects(
       } catch (err) {
         throw new HttpError(400, err instanceof Error ? err.message : String(err));
       }
+      const env = entry.accountId
+        ? await gitEnvForAccount(entry.accountId, hostStorePaths(rootDir), usernames.get(entry.accountId))
+        : undefined;
       try {
-        await ensureCheckout(run, { repoUrl: entry.repoUrl, dir, branch: entry.branch });
+        await ensureCheckout(runner, {
+          repoUrl: entry.repoUrl,
+          dir,
+          branch: entry.branch,
+          ...(env ? { env } : {}),
+        });
       } catch (err) {
         store.remove(entry.id);
         await store.flush().catch(() => undefined);
@@ -223,9 +246,11 @@ export async function pullProjects(
   profile: string,
   rootDir: string | undefined,
   body: unknown,
+  runner: GitRunner = run,
 ): Promise<{ results: PullRunItem[] }> {
   const { appPaths, workspaceDir, store } = await statePaths(profile, rootDir);
   const schedule = store.getSchedule();
+  const usernames = await accountUsernames(rootDir);
   const raw = body as { id?: unknown };
   const onlyId = typeof raw?.id === 'string' ? raw.id : undefined;
   const targets = store.list().filter((p) => !onlyId || p.id === onlyId);
@@ -238,11 +263,15 @@ export async function pullProjects(
     let detail: string;
     try {
       const dir = resolveProjectDir(workspaceDir, project.localPath);
-      if (!(await isGitRepo(run, dir).catch(() => false))) {
+      const env = project.accountId
+        ? await gitEnvForAccount(project.accountId, hostStorePaths(rootDir), usernames.get(project.accountId))
+        : undefined;
+      const projectRun = env ? withGitEnv(runner, env) : runner;
+      if (!(await isGitRepo(projectRun, dir).catch(() => false))) {
         result = 'failed';
         detail = '目录不存在或不是 git 仓库，请重新添加项目';
       } else {
-        const outcome = await pullRepo(run, dir, schedule.strategy);
+        const outcome = await pullRepo(projectRun, dir, schedule.strategy);
         result = outcome.status;
         detail = outcome.detail;
       }
