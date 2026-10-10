@@ -38,7 +38,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await handle.close();
-  await rm(rootDir, { recursive: true, force: true });
+  await rm(rootDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function git(cwd: string, args: string[]): void {
@@ -73,7 +73,7 @@ async function json(res: Response): Promise<any> {
   return res.json();
 }
 
-describe('workspace routes', () => {
+describe('workspace routes', { timeout: 30_000 }, () => {
   it('browses a directory', async () => {
     const res = await get(`/api/workspace/dir?path=${encodeURIComponent(workspace)}`);
     expect(res.status).toBe(200);

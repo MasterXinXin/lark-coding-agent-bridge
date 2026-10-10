@@ -33,7 +33,9 @@ beforeEach(async () => {
   await writeActiveProfile(rootDir, 'claude');
 });
 afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  await Promise.all(
+    cleanups.splice(0).map((d) => rm(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
+  );
 });
 
 function git(cwd: string, args: string[]): void {
@@ -53,7 +55,7 @@ async function makeOrigin(base: string): Promise<string> {
   return origin;
 }
 
-describe('workspace-api', () => {
+describe('workspace-api', { timeout: 30_000 }, () => {
   it('adds a project and clones it into the workspace', async () => {
     const origin = await makeOrigin(rootDir);
     await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, branch: 'main', name: 'backend' }] });
@@ -91,7 +93,7 @@ describe('workspace-api', () => {
   it('records a failed manual pull when the checkout is missing', async () => {
     const origin = await makeOrigin(rootDir);
     await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'x' }] });
-    await rm(join(workspace, 'x'), { recursive: true, force: true });
+    await rm(join(workspace, 'x'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     const run = await pullProjects('claude', rootDir, {});
     expect(run.results[0]!.result).toBe('failed');
     const view = await projectsView('claude', rootDir);

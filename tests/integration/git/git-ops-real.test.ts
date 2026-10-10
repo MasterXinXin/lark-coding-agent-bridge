@@ -10,7 +10,9 @@ function git(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } });
 }
 afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  await Promise.all(
+    cleanups.splice(0).map((d) => rm(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
+  );
 });
 
 describe('git-ops against real git', () => {
