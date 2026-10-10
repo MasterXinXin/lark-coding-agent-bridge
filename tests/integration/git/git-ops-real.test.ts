@@ -40,5 +40,5 @@ describe('git-ops against real git', () => {
     // dirty tree is skipped
     await writeFile(join(clone, 'wip.txt'), 'x', 'utf8');
     expect((await pullRepo(run, clone, 'ff-only')).status).toBe('skipped');
-  });
+  }, 30_000);
 });

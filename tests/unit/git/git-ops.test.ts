@@ -49,6 +49,7 @@ describe('git-ops basic queries', () => {
     expect(normalizeRemote('https://github.com/a/b.git')).toBe('github.com/a/b');
     expect(normalizeRemote('git@github.com:a/b.git')).toBe('github.com/a/b');
     expect(normalizeRemote('https://GitHub.com/a/b/')).toBe('github.com/a/b');
+    expect(normalizeRemote('https://host/a/b.git/')).toBe('host/a/b');
   });
 });
 

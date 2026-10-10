@@ -81,8 +81,8 @@ export function normalizeRemote(url: string): string {
     .replace(/^[^@/]+@/, '')
     // SCP-style `host:owner/repo` → `host/owner/repo`.
     .replace(/^([^/]+):/, '$1/')
-    .replace(/\.git$/i, '')
     .replace(/\/+$/, '')
+    .replace(/\.git$/i, '')
     .toLowerCase();
 }
 
