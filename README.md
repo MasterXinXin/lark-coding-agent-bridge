@@ -1,4 +1,4 @@
-# @fullstackjam/lark-coding-agent-bridge
+# @masterxinxin/lark-coding-agent-bridge
 
 > **Private fork of [zarazhangrui/lark-coding-agent-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge) (upstream npm package: `lark-channel-bridge`).** The fork's reason for existing is to add an **opencode** adapter alongside the upstream's Claude Code and Codex adapters. Most documentation below is upstream's; fork-specific notes are flagged inline.
 
@@ -116,9 +116,9 @@ How it works:
 ## Install
 
 ```bash
-npm i -g @fullstackjam/lark-coding-agent-bridge
+npm i -g @masterxinxin/lark-coding-agent-bridge
 # or
-pnpm add -g @fullstackjam/lark-coding-agent-bridge
+pnpm add -g @masterxinxin/lark-coding-agent-bridge
 ```
 
 The installed CLI command is still `lark-channel-bridge` for upstream compatibility.
@@ -430,7 +430,7 @@ LARK_CHANNEL_TELEMETRY_MODULE=your-telemetry-package lark-channel-bridge start
 That module receives every `log.*` event plus error/metric hooks and forwards them wherever you like. The interface is exported from the package root:
 
 ```ts
-import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from '@fullstackjam/lark-coding-agent-bridge';
+import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from '@masterxinxin/lark-coding-agent-bridge';
 
 const createAdapter: AdapterFactory = (meta) => ({
   emit(event) {/* ship event */},

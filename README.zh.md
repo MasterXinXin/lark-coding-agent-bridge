@@ -1,4 +1,4 @@
-# @fullstackjam/lark-coding-agent-bridge
+# @masterxinxin/lark-coding-agent-bridge
 
 > **[zarazhangrui/lark-coding-agent-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge) 的私人 fork**（上游 npm 包名 `lark-channel-bridge`）。fork 存在的理由：在上游 Claude Code 与 Codex adapter 旁边再加一个 **opencode** adapter。下面大部分文档沿用上游内容，fork 特有改动会在行内标注。
 
@@ -116,9 +116,9 @@ flowchart TD
 ## 安装
 
 ```bash
-npm i -g @fullstackjam/lark-coding-agent-bridge
+npm i -g @masterxinxin/lark-coding-agent-bridge
 # 或
-pnpm add -g @fullstackjam/lark-coding-agent-bridge
+pnpm add -g @masterxinxin/lark-coding-agent-bridge
 ```
 
 安装后实际可用的 CLI 命令仍然是 `lark-channel-bridge`，与上游保持兼容。
@@ -430,7 +430,7 @@ LARK_CHANNEL_TELEMETRY_MODULE=your-telemetry-package lark-channel-bridge start
 该模块会收到每一条 `log.*` 事件，以及错误 / 指标钩子，转发到任何你想要的地方。接口从包根导出：
 
 ```ts
-import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from '@fullstackjam/lark-coding-agent-bridge';
+import type { AdapterFactory, TelemetryAdapter, TelemetryEvent } from '@masterxinxin/lark-coding-agent-bridge';
 
 const createAdapter: AdapterFactory = (meta) => ({
   emit(event) {/* 上报事件 */},

@@ -1,11 +1,16 @@
 # Changelog
 
-All notable changes to **@fullstackjam/lark-coding-agent-bridge** are documented here.
+All notable changes to **@masterxinxin/lark-coding-agent-bridge** are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
 This is a private fork of [zarazhangrui/lark-coding-agent-bridge](https://github.com/zarazhangrui/lark-coding-agent-bridge) (upstream npm package `lark-channel-bridge`). The fork's reason for existing is to add an **opencode** adapter alongside the upstream's Claude Code and Codex adapters.
 
 Upstream history is not duplicated here; consult [the upstream repo](https://github.com/zarazhangrui/lark-coding-agent-bridge/commits/main) for changes inherited at fork time.
+
+## [Unreleased]
+
+### Changed
+- **Renamed the package to `@masterxinxin/lark-coding-agent-bridge`** and retargeted the repo / bugs / homepage URLs at `MasterXinXin/lark-coding-agent-bridge`. Install and import snippets in `README.md` / `README.zh.md` were updated to match.
 
 ## [0.3.2] - 2026-06-07
 
@@ -82,7 +87,7 @@ The first release of the fork. Adds **opencode** as a third local agent alongsid
 - `OpencodeAdapter` exported from `src/agent/index.ts`.
 
 ### Pre-release scaffolding (carried over)
-- Rebranded to `@fullstackjam/lark-coding-agent-bridge`; repo / bugs / homepage URLs retargeted at this fork.
+- Rebranded the fork under its own npm scope; repo / bugs / homepage URLs retargeted at this fork.
 - LICENSE adds a second copyright line for the fork; upstream line preserved per MIT.
 - Tag-triggered release workflow (`.github/workflows/release.yml`): pnpm install + typecheck + test + build, verifies tag matches package.json, publishes to npm with provenance, creates GitHub Release with auto-generated notes.
 

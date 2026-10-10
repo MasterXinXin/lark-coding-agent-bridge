@@ -1,5 +1,5 @@
 {
-  "name": "@fullstackjam/lark-coding-agent-bridge",
+  "name": "@masterxinxin/lark-coding-agent-bridge",
   "version": "0.4.0",
   "description": "Fork of zarazhangrui/lark-coding-agent-bridge with opencode adapter added",
   "type": "module",
@@ -10,12 +10,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fullstackjam/lark-coding-agent-bridge.git"
+    "url": "git+https://github.com/MasterXinXin/lark-coding-agent-bridge.git"
   },
   "bugs": {
-    "url": "https://github.com/fullstackjam/lark-coding-agent-bridge/issues"
+    "url": "https://github.com/MasterXinXin/lark-coding-agent-bridge/issues"
   },
-  "homepage": "https://github.com/fullstackjam/lark-coding-agent-bridge#readme",
+  "homepage": "https://github.com/MasterXinXin/lark-coding-agent-bridge#readme",
   "bin": {
     "lark-channel-bridge": "./bin/lark-channel-bridge.mjs"
   },
