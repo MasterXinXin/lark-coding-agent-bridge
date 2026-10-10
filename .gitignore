@@ -25,3 +25,6 @@ tests-smoke/
 # oh-my-openagent runtime state — concrete opencode session IDs and
 # background-task continuation snapshots. Machine-local; not for git.
 .omo/
+
+# Superpowers brainstorming companion output (local mockups/specs scratch)
+.superpowers/
