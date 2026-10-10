@@ -429,6 +429,49 @@ describe('markdown stream startup failures', () => {
   });
 });
 
+describe('card reply mode feedback', () => {
+  it('adds a typing reaction and renders a running spinner, then cleans up', async () => {
+    const cards: Array<{ header?: { title?: { content?: string } } }> = [];
+    const h = await createHarness({
+      messageReply: 'card',
+      events: [
+        { type: 'text', delta: 'progress update' },
+        { type: 'done', terminationReason: 'normal' },
+      ],
+      stream: async (_chatId, input) => {
+        const producer = (input as {
+          card?: { producer?: (ctrl: { update(next: unknown): Promise<void> }) => Promise<void> };
+        }).card?.producer;
+        await producer?.({
+          update: vi.fn(async (next: unknown) => {
+            cards.push(next as { header?: { title?: { content?: string } } });
+          }),
+        });
+      },
+    });
+    await startTestBridge(h);
+
+    await h.channel.handlers.message?.(message('om_card_ack', 'run'));
+
+    // 卡片模式下也应在触发消息上打「敲键盘」reaction。
+    await waitFor(() => h.channel.rawClient.im.v1.messageReaction.create.mock.calls.length > 0);
+    expect(h.channel.rawClient.im.v1.messageReaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { message_id: 'om_card_ack' },
+        data: { reaction_type: { emoji_type: 'Typing' } },
+      }),
+    );
+
+    // 运行态 header 前导字符是盲文帧。
+    await waitFor(() =>
+      cards.some((card) => /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] /.test(card.header?.title?.content ?? '')),
+    );
+
+    // run 结束后移除 reaction。
+    await waitFor(() => h.channel.rawClient.im.v1.messageReaction.delete.mock.calls.length > 0);
+  });
+});
+
 async function createHarness(options: {
   reactionCreate?: () => Promise<{ data: { reaction_id: string } }>;
   stream?: StreamFn;

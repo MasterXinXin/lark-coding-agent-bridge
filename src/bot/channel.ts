@@ -1174,12 +1174,11 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
       : {}),
   };
 
-  // For non-card modes Claude's output doesn't surface visually until either
-  // a first streamed token (markdown mode) or the whole run ends (text mode).
-  // Add a "Typing" reaction to the triggering message as an instant ack, but
-  // never let that outbound API call block agent event draining.
-  const reactionPromise =
-    cotEnabled || replyMode === 'card' ? undefined : addWorkingReaction(channel, lastMsg.messageId);
+  // Signal "got it, working on it" on the user's message. CoT mode has its own
+  // bubble, so it is the only mode that skips the reaction; card mode keeps it
+  // alongside the streaming card. Never let that outbound API call block agent
+  // event draining.
+  const reactionPromise = cotEnabled ? undefined : addWorkingReaction(channel, lastMsg.messageId);
 
   // Permission card sender — currently only opencode emits permission_request.
   // Send a fresh sibling card per request (not patched into the run card) so
