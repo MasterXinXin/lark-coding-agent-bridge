@@ -5,6 +5,8 @@ import { listAllProfiles } from '../runtime/profile-discovery';
 import { pullProjects } from '../ui/workspace-api';
 import { createCodegraphHook } from './codegraph';
 import { MAX_RECORDS, readPullRecords, type PullResult } from './history';
+import { OperationCancelledError } from './operation-context';
+import { defaultOperations } from './operations';
 import { ProjectStore, type PullSchedule } from './projects';
 
 export interface ScheduledRunItem {
@@ -191,7 +193,16 @@ export class PullScheduler {
           if (last !== undefined && now - last < dueMs) continue;
           // Record before awaiting so a slow pull can't be re-entered.
           this.lastRun.set(profile, now);
-          const results = await this.runProfile(profile);
+          const results = await defaultOperations.run(
+            {
+              id: `schedule:${profile}:${now}`,
+              opKind: 'schedule-pull',
+              label: `定时拉取 ${profile}`,
+              profile,
+              ...(this.rootDir ? { rootDir: this.rootDir } : {}),
+            },
+            () => this.runProfile(profile),
+          );
           const failed = results.filter((r) => r.result === 'failed');
           log.info('scheduler', 'run', { profile, failed: failed.length });
           if (failed.length > 0 && schedule.notifyOnFailure) {
@@ -199,6 +210,10 @@ export class PullScheduler {
             if (!delivered) log.info('scheduler', 'notify-skipped', { profile });
           }
         } catch (err) {
+          if (err instanceof OperationCancelledError) {
+            log.info('scheduler', 'run-cancelled', { profile });
+            continue;
+          }
           log.fail('scheduler', err, { profile });
         }
       }

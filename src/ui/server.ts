@@ -58,6 +58,7 @@ import {
   startPullJob,
   type StartJobDeps,
 } from '../workspace/git-jobs';
+import { cancelOperation, cancelOperationsForProfile } from '../workspace/operations';
 import { codegraphProjectStatsView, codegraphSystemView } from './codegraph-api';
 import type { Controls } from '../commands';
 import type { UiServerDeps, UiServerHandle } from './types';
@@ -204,6 +205,8 @@ async function route(
   if (path === '/api/profiles/stop' && p) {
     const body = (await readJsonBody(req)) as { profile?: string };
     if (!body.profile) throw new HttpError(400, 'profile is required');
+    // Cancel any workspace job the profile owns before taking it offline.
+    await cancelOperationsForProfile(body.profile, 'profile-stopped').catch(() => undefined);
     await sup.stopProfile(body.profile);
     sendJson(res, 200, { ok: true, profile: body.profile });
     return;
@@ -510,6 +513,13 @@ async function route(
     const snap = (deps.jobRegistry ?? jobRegistry).get(id, since);
     if (!snap) throw new HttpError(404, '任务不存在或已过期');
     sendJson(res, 200, snap);
+    return;
+  }
+  if (path.startsWith('/api/jobs/') && p && path.endsWith('/cancel')) {
+    const id = decodeURIComponent(path.slice('/api/jobs/'.length, -'/cancel'.length));
+    const cancelled = await cancelOperation(id, 'user-cancelled');
+    if (!cancelled) throw new HttpError(404, '任务不存在或已结束');
+    sendJson(res, 200, { ok: true, id });
     return;
   }
 
