@@ -187,6 +187,7 @@ export interface ProjectView {
   exists: boolean;
   status: RepoStatus;
   lastPullAt?: string;
+  codegraph: CodegraphIndexInfo;
 }
 
 export interface ProjectsView {
@@ -260,6 +261,43 @@ export interface JobView {
 
 export interface StartJobResponse {
   jobId: string;
+}
+
+// ── codegraph (per-project code index) ───────────────────────────────────────
+
+export interface CodegraphIndexInfo {
+  indexed: boolean;
+  dbPath?: string;
+  dbSizeBytes?: number;
+  updatedAt?: string;
+}
+
+export interface CodegraphCliStatus {
+  installed: boolean;
+  version?: string;
+  binaryPath?: string;
+}
+
+export type CodegraphMcpState = "installed" | "missing" | "unknown";
+
+export interface CodegraphMcpStatus {
+  state: CodegraphMcpState;
+  configPath?: string;
+}
+
+export interface CodegraphSystemView {
+  cli: CodegraphCliStatus;
+  mcp: CodegraphMcpStatus;
+}
+
+export interface CodegraphStats {
+  initialized: boolean;
+  fileCount: number;
+  nodeCount: number;
+  edgeCount: number;
+  dbSizeBytes: number;
+  languages: string[];
+  pendingChanges: { added: number; modified: number; removed: number };
 }
 
 // ── global git accounts & provider repos ─────────────────────────────────────
