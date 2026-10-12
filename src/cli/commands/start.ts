@@ -59,6 +59,7 @@ export { assertReconnectAgentKindUnchanged, createRuntimeAgent };
 import { SessionStore } from '../../session/store';
 import { SessionCatalog } from '../../session/catalog';
 import { WorkspaceStore } from '../../workspace/store';
+import { PullScheduler } from '../../workspace/scheduler';
 
 // Prefer IPv4 — Node 20+ defaults to "verbatim" which respects whatever
 // the resolver returns first; in IPv6-broken networks (WSL2, certain VPNs,
@@ -215,6 +216,25 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
     log.warn('ui', 'server-start-failed', { err: String(err) });
   }
 
+  // Supervisor-wide scheduled pulls: each tick reads every profile's own
+  // `projects.json` schedule and runs the due ones with `trigger:'schedule'`.
+  const scheduler = new PullScheduler({
+    rootDir: appPaths.rootDir,
+    notify: async (profile, message) => {
+      const channel = supervisor.channelFor(profile);
+      const ownerId = supervisor.controlsFor(profile)?.botOwnerId;
+      if (!channel || !ownerId) return false; // profile offline / owner unknown
+      try {
+        await channel.send(ownerId, { markdown: message });
+        return true;
+      } catch (err) {
+        log.warn('scheduler', 'notify-failed', { profile, err: String(err) });
+        return false;
+      }
+    },
+  });
+  scheduler.start();
+
   // Auto-start only the active profile; others start on demand from the console.
   try {
     await supervisor.startProfile(appPaths.profile);
@@ -226,7 +246,7 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
     log.warn('supervisor', 'active-start-failed', { profile: appPaths.profile, err: String(err) });
   }
 
-  await parkWithShutdown(supervisor, appPaths, uiServer, hostLock);
+  await parkWithShutdown(supervisor, appPaths, uiServer, hostLock, scheduler);
 }
 
 /**
@@ -240,12 +260,14 @@ function parkWithShutdown(
   appPaths: AppPaths,
   uiServer: UiServerHandle | undefined,
   hostLock: { release(): Promise<void> } | undefined,
+  scheduler?: PullScheduler,
 ): Promise<void> {
   let shuttingDown = false;
   const shutdown = async (sig: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`\n收到 ${sig}，正在关闭...`);
+    scheduler?.stop();
     if (uiServer) {
       await uiServer.close().catch(() => {});
       await removeUiSidecar(appPaths.hostUiFile);
