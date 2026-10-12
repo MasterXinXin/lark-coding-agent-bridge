@@ -21,6 +21,7 @@ import {
   updateProjectBranch,
 } from '../../../src/ui/workspace-api';
 import { ProjectStore } from '../../../src/workspace/projects';
+import { readPullRecords } from '../../../src/workspace/history';
 
 const app = { id: 'cli_test', secret: 's', tenant: 'feishu' as const };
 let rootDir: string;
@@ -129,6 +130,20 @@ describe('workspace-api', { timeout: 30_000 }, () => {
     expect(run.results[0]!.result).toBe('failed');
     const view = await projectsView('claude', rootDir);
     expect(view.projects[0]!.lastPullAt).toBeTruthy();
+  });
+
+  it('records the trigger passed to pullProjects, defaulting to manual', async () => {
+    const origin = await makeOrigin(rootDir);
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'x' }] });
+    const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
+
+    await pullProjects('claude', rootDir, {}, undefined, undefined, 'schedule');
+    let rows = await readPullRecords(appPaths.pullHistoryFile, 10);
+    expect(rows[0]!.trigger).toBe('schedule');
+
+    await pullProjects('claude', rootDir, {});
+    rows = await readPullRecords(appPaths.pullHistoryFile, 10);
+    expect(rows[0]!.trigger).toBe('manual');
   });
 
   it('resolves in-workspace names and rejects real escapes', () => {

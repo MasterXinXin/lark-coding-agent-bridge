@@ -167,6 +167,30 @@ describe('workspace routes', { timeout: 30_000 }, () => {
     expect(snap.kind).toBe('pull');
   });
 
+  it('returns pull history recorded by a manual pull and clamps limit', async () => {
+    const origin = await makeOrigin(rootDir);
+    const created = await post('/api/projects', { projects: [{ repoUrl: origin, name: 'x' }] });
+    const { jobId: addJobId } = await json(created);
+    expect((await waitForJob(addJobId)).status).toBe('succeeded');
+
+    const pulled = await post('/api/projects/pull', {});
+    const { jobId } = await json(pulled);
+    expect((await waitForJob(jobId)).status).toBe('succeeded');
+
+    const res = await get('/api/pull-history?limit=1');
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.records).toHaveLength(1);
+    expect(body.records[0]).toMatchObject({ name: 'x', trigger: 'manual' });
+
+    // limit clamps to at least 1 ...
+    const zero = await json(await get('/api/pull-history?limit=0'));
+    expect(zero.records).toHaveLength(1);
+    // ... and non-finite falls back to the default.
+    const junk = await json(await get('/api/pull-history?limit=abc'));
+    expect(Array.isArray(junk.records)).toBe(true);
+  });
+
   it('sets the workspace root override', async () => {
     const other = join(rootDir, 'ws2');
     await mkdir(other, { recursive: true });

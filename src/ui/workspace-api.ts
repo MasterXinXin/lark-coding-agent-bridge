@@ -15,7 +15,13 @@ import {
   type GitRunner,
   type RepoStatus,
 } from '../git/git-ops';
-import { appendPullRecord, readPullRecords, type PullResult } from '../workspace/history';
+import {
+  appendPullRecord,
+  readPullRecords,
+  type PullRecord,
+  type PullResult,
+  type PullTrigger,
+} from '../workspace/history';
 import { browseDirectory } from '../workspace/dir-browse';
 import { ProjectStore, type ProjectEntry, type PullSchedule } from '../workspace/projects';
 import { HttpError } from './http';
@@ -322,6 +328,7 @@ export async function pullProjects(
   body: unknown,
   runner: GitRunner = run,
   onStep?: (info: { id: string; name: string }) => void,
+  trigger: PullTrigger = 'manual',
 ): Promise<{ results: PullRunItem[] }> {
   const { appPaths, workspaceDir, store } = await statePaths(profile, rootDir);
   const schedule = store.getSchedule();
@@ -367,10 +374,20 @@ export async function pullProjects(
     await appendPullRecord(appPaths.pullHistoryFile, {
       ts: new Date().toISOString(),
       ...entry,
-      trigger: 'manual',
+      trigger,
     });
   }
   return { results };
+}
+
+/** Newest-first pull records for a profile, capped at `limit`. */
+export async function readPullHistory(
+  profile: string,
+  rootDir: string | undefined,
+  limit: number,
+): Promise<PullRecord[]> {
+  const appPaths = resolveAppPaths({ rootDir, profile });
+  return readPullRecords(appPaths.pullHistoryFile, limit);
 }
 
 export async function getSchedule(profile: string, rootDir?: string): Promise<PullSchedule> {
