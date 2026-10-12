@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { resolveExecutablePath } from '../cli/agent-detection';
@@ -240,4 +240,88 @@ export async function mcpStatus(opts: McpStatusOptions = {}): Promise<CodegraphM
   }
   if (!sawFile) return { state: 'unknown' };
   return { state: sawParsed ? 'missing' : 'unknown' };
+}
+
+export interface CodegraphIndexInfo {
+  indexed: boolean;
+  dbPath?: string;
+  dbSizeBytes?: number;
+  updatedAt?: string;
+}
+
+/**
+ * Cheap, pure-filesystem index probe. Deliberately never runs
+ * `codegraph status`: for an un-indexed directory that command blocks on an
+ * interactive prompt (measured 60s+ hang), which would freeze a row render.
+ */
+export async function projectIndexInfo(dir: string): Promise<CodegraphIndexInfo> {
+  const dbPath = join(dir, '.codegraph', 'codegraph.db');
+  try {
+    const info = await stat(dbPath);
+    if (!info.isFile()) return { indexed: false };
+    return { indexed: true, dbPath, dbSizeBytes: info.size, updatedAt: info.mtime.toISOString() };
+  } catch {
+    return { indexed: false };
+  }
+}
+
+export interface CodegraphPendingChanges {
+  added: number;
+  modified: number;
+  removed: number;
+}
+
+export interface CodegraphStats {
+  initialized: boolean;
+  fileCount: number;
+  nodeCount: number;
+  edgeCount: number;
+  dbSizeBytes: number;
+  languages: string[];
+  pendingChanges: CodegraphPendingChanges;
+}
+
+export const EMPTY_CODEGRAPH_STATS: CodegraphStats = {
+  initialized: false,
+  fileCount: 0,
+  nodeCount: 0,
+  edgeCount: 0,
+  dbSizeBytes: 0,
+  languages: [],
+  pendingChanges: { added: 0, modified: 0, removed: 0 },
+};
+
+const asNumber = (value: unknown): number =>
+  typeof value === 'number' && Number.isFinite(value) ? value : 0;
+
+/** Full stats for an indexed project; empty stats otherwise (never spawns). */
+export async function projectStats(runner: CodegraphRunner, dir: string): Promise<CodegraphStats> {
+  if (!(await projectIndexInfo(dir)).indexed) return EMPTY_CODEGRAPH_STATS;
+  const result = await runner(['status', dir, '--json'], { timeoutMs: 30_000 }).catch(
+    () => ({ code: -1, stdout: '', stderr: '' }) as CodegraphResult,
+  );
+  if (result.code !== 0) return EMPTY_CODEGRAPH_STATS;
+  try {
+    const raw = JSON.parse(result.stdout) as Record<string, unknown>;
+    const pending = (
+      raw.pendingChanges && typeof raw.pendingChanges === 'object' ? raw.pendingChanges : {}
+    ) as Record<string, unknown>;
+    return {
+      initialized: raw.initialized === true,
+      fileCount: asNumber(raw.fileCount),
+      nodeCount: asNumber(raw.nodeCount),
+      edgeCount: asNumber(raw.edgeCount),
+      dbSizeBytes: asNumber(raw.dbSizeBytes),
+      languages: Array.isArray(raw.languages)
+        ? raw.languages.filter((l): l is string => typeof l === 'string')
+        : [],
+      pendingChanges: {
+        added: asNumber(pending.added),
+        modified: asNumber(pending.modified),
+        removed: asNumber(pending.removed),
+      },
+    };
+  } catch {
+    return EMPTY_CODEGRAPH_STATS;
+  }
 }

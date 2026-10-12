@@ -3,11 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  EMPTY_CODEGRAPH_STATS,
   defaultCodegraphBin,
   detectCli,
   hasCodegraphMcp,
   mcpStatus,
   parseJsonc,
+  projectIndexInfo,
+  projectStats,
   type CodegraphResult,
   type CodegraphRunner,
 } from '../../../src/workspace/codegraph';
@@ -129,5 +132,64 @@ describe('mcpStatus', () => {
     const status = await mcpStatus({ dirs: [dir] });
     expect(status.state).toBe('installed');
     expect(status.configPath).toBe(join(dir, 'opencode.jsonc'));
+  });
+});
+
+describe('projectIndexInfo', () => {
+  it('is false when .codegraph/codegraph.db is absent', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'codegraph-index-'));
+    cleanups.push(dir);
+    expect(await projectIndexInfo(dir)).toEqual({ indexed: false });
+  });
+
+  it('is true with size and mtime when the db exists', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'codegraph-index-'));
+    cleanups.push(dir);
+    await mkdir(join(dir, '.codegraph'), { recursive: true });
+    await writeFile(join(dir, '.codegraph', 'codegraph.db'), 'x'.repeat(42));
+    const info = await projectIndexInfo(dir);
+    expect(info.indexed).toBe(true);
+    expect(info.dbSizeBytes).toBe(42);
+    expect(typeof info.updatedAt).toBe('string');
+  });
+});
+
+describe('projectStats', () => {
+  async function indexedDir(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'codegraph-stats-'));
+    cleanups.push(dir);
+    await mkdir(join(dir, '.codegraph'), { recursive: true });
+    await writeFile(join(dir, '.codegraph', 'codegraph.db'), 'x');
+    return dir;
+  }
+
+  it('never spawns status for an un-indexed project', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'codegraph-stats-'));
+    cleanups.push(dir);
+    const { runner, calls } = recordingRunner(() => ({ code: 0, stdout: '{}' }));
+    expect(await projectStats(runner, dir)).toEqual(EMPTY_CODEGRAPH_STATS);
+    expect(calls).toEqual([]);
+  });
+
+  it('parses status --json for an indexed project', async () => {
+    const dir = await indexedDir();
+    const payload = {
+      initialized: true,
+      fileCount: 12,
+      nodeCount: 34,
+      edgeCount: 56,
+      dbSizeBytes: 789,
+      languages: ['typescript', 'markdown'],
+      pendingChanges: { added: 1, modified: 2, removed: 3 },
+    };
+    const { runner, calls } = recordingRunner(() => ({ code: 0, stdout: JSON.stringify(payload) }));
+    expect(await projectStats(runner, dir)).toEqual(payload);
+    expect(calls).toEqual([['status', dir, '--json']]);
+  });
+
+  it('falls back to empty stats on malformed output', async () => {
+    const dir = await indexedDir();
+    const { runner } = recordingRunner(() => ({ code: 0, stdout: 'not json' }));
+    expect(await projectStats(runner, dir)).toEqual(EMPTY_CODEGRAPH_STATS);
   });
 });
