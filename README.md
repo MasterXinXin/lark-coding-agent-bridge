@@ -300,7 +300,7 @@ The management console (the `http://127.0.0.1:<port>/?token=…` URL the bridge 
 - **Add from an account**: once a Git account is configured you can list its remote repositories and add several at once with a per-repo branch; you can also paste a repository URL manually.
 - **Live progress**: add (clone) and pull run in the background while a progress dialog streams git's output (progress, `remote:` messages) and phases. Closing the dialog leaves the task running; reloading the page reconnects you to that task's progress view.
 - **Remove a project**: by default only the record is removed; the confirmation dialog offers "remove and delete the directory" to delete the local checkout too (a dirty tree / missing directory / non-git repo shows a red warning but can still be deleted).
-- **Scheduled pulls**: enable a profile-level schedule (interval 5–1440 min, strategy `ff-only` / `reset-hard`). The supervisor drives it, so offline profiles still pull; a locally dirty tree is skipped and recorded, never overwritten.
+- **Scheduled pulls**: enable a profile-level schedule (interval 5–1440 min, strategy `ff-only` / `reset-hard`). The supervisor drives it, so offline profiles still pull; a locally dirty tree is skipped and recorded, never overwritten. The last scheduled run time is recovered from the pull history, so a bridge restart keeps the interval and does not pull immediately.
 - **Pull history**: every pull (scheduled or manual) is appended to `profiles/<profile>/pull-history.jsonl`; the console shows recent records and notifies the owner on failures (optional).
 - Only one add/pull task runs at a time. Task state lives in memory only, so an in-progress task is lost if the bridge restarts.
 

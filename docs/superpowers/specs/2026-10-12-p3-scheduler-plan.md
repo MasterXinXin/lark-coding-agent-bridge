@@ -15,13 +15,13 @@
 ### P3.1 调度器 + 执行记录 API（后端核心）
 
 - 新增 `src/workspace/scheduler.ts`：`PullScheduler` 单例类。
-  - 依赖全部可注入以便测试：`now()`、`listProfiles()`、`runProfile(profile)`、`notify(profile, message)`、`checkGit()`、`intervalMs`、`rootDir`。
+  - 依赖全部可注入以便测试：`now()`、`listProfiles()`、`runProfile(profile)`、`notify(profile, message)`、`checkGit()`、`seedLastRun(profile)`、`intervalMs`、`rootDir`。
   - `start()`：`setInterval`（默认 60s，`unref()` 不阻止进程退出）；`stop()`：清定时器。
   - `tick()`（可单独测试）：
     1. `running` 标志防重入。
     2. `checkGit()` 为假 → 跳过整轮并记日志。
     3. 遍历 `listProfiles()`，逐个读 `projects.json` 的 `schedule`；未启用跳过。
-    4. 到点判断：`lastRun` 内存表，`now - lastRun >= intervalMinutes*60000`；首次见到的启用计划立即执行（记 `lastRun=now` 后再执行，避免慢拉取重入）。
+    4. 到点判断：`lastRun` 表，`now - lastRun >= intervalMinutes*60000`；首次见到某 profile 时先 `seedLastRun` 从 `pull-history.jsonl` 里最后一条 `trigger:'schedule'` 记录恢复 `lastRun`（无记录或读取失败则视为到点），恢复后再判断；执行前先 `lastRun=now`，避免慢拉取重入。
     5. 调 `runProfile(profile)` 执行该 profile 的全部项目拉取，`trigger:'schedule'`。
     6. 若有 `failed` 且 `notifyOnFailure` → `notify(profile, 摘要)`；profile 离线（notify 返回 false）只记日志。
     7. 单 profile 异常不阻断其它 profile。
