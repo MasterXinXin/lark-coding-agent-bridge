@@ -212,4 +212,44 @@ describe('git jobs', { timeout: 60_000 }, () => {
     // No raw escape or carriage-return bytes leak into the log.
     expect(texts.every((t) => !t.includes('\x1b') && !t.includes('\r'))).toBe(true);
   });
+
+  it('collapses git clone progress frames in the job log', async () => {
+    // Blocking git (non-TTY) emits each progress frame as its own CRLF line.
+    const progress =
+      "Cloning into 'x'...\r\n" +
+      'remote: Counting objects:  12% (1/8)\r\n' +
+      'remote: Counting objects:  50% (4/8)\r\n' +
+      'remote: Counting objects: 100% (8/8), done.\r\n' +
+      'Receiving objects:  50% (4/8)\r\n' +
+      'Receiving objects: 100% (8/8), done.\r\n';
+
+    const runner: GitRunner = async (args, opts) => {
+      if (args[0] === 'clone') opts?.onOutput?.(progress);
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    const codegraph: CodegraphHook = {
+      available: false,
+      init: async () => ({ ok: true }),
+      sync: async () => ({ ok: true }),
+      installCli: async () => ({ ok: true }),
+      wireMcp: async () => ({ ok: true }),
+    };
+
+    const registry = new JobRegistry();
+    const { id } = startAddJob(
+      'claude',
+      rootDir,
+      { projects: [{ repoUrl: 'https://example.invalid/x.git', name: 'x' }] },
+      { registry, runner, codegraph },
+    );
+    const snap = await waitForJob(registry, id);
+    expect(snap.status).toBe('succeeded');
+
+    const texts = snap.logs.map((l) => l.text);
+    // Only the final frame of each phase survives.
+    expect(texts).toContain('remote: Counting objects: 100% (8/8), done.');
+    expect(texts).toContain('Receiving objects: 100% (8/8), done.');
+    expect(texts.some((t) => t.includes('12%'))).toBe(false);
+    expect(texts.every((t) => !t.includes('\r'))).toBe(true);
+  });
 });

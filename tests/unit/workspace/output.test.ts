@@ -62,6 +62,41 @@ describe('createProgressWriter', () => {
     expect(lines).toEqual(['done']);
   });
 
+  it('collapses consecutive percentage progress lines for the same phase', () => {
+    const { lines, push, flush } = collect();
+    push('remote: Counting objects:  12% (1/8)\n');
+    push('remote: Counting objects:  50% (4/8)\n');
+    push('remote: Counting objects: 100% (8/8), done.\n');
+    push('remote: Compressing objects:  50% (3/6)\n');
+    push('remote: Compressing objects: 100% (6/6), done.\n');
+    push('Receiving objects: 100% (8/8), done.\n');
+    flush();
+    expect(lines).toEqual([
+      'remote: Counting objects: 100% (8/8), done.',
+      'remote: Compressing objects: 100% (6/6), done.',
+      'Receiving objects: 100% (8/8), done.',
+    ]);
+  });
+
+  it('flushes a pending progress line before an unrelated line', () => {
+    const { lines, push, flush } = collect();
+    push('Resolving deltas:  50% (5/10)\n');
+    push('Cloning into x\n');
+    flush();
+    expect(lines).toEqual(['Resolving deltas:  50% (5/10)', 'Cloning into x']);
+  });
+
+  it('keeps lines without a percentage untouched', () => {
+    const { lines, push, flush } = collect();
+    push('remote: Enumerating objects: 8, done.\n');
+    push('remote: Total 8 (delta 0), reused 0\n');
+    flush();
+    expect(lines).toEqual([
+      'remote: Enumerating objects: 8, done.',
+      'remote: Total 8 (delta 0), reused 0',
+    ]);
+  });
+
   it('sanitizes the real init stream into readable lines', () => {
     const { lines, push, flush } = collect();
     push('┌  Initializing CodeGraph\n│\n◆  Initialized in D:\\test\\e-archives\n');

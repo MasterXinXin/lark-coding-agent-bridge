@@ -11,7 +11,7 @@ import {
   type ExecutableResolver,
 } from './codegraph';
 import { JobRegistry } from './jobs';
-import { createProgressWriter, type ProgressWriter } from './output';
+import { createProgressWriter } from './output';
 
 /** Process-wide registry backing the console's `GET /api/jobs/:id` route. */
 export const jobRegistry = new JobRegistry();
@@ -77,17 +77,18 @@ function beginJob(
 
   let currentStep: string | undefined;
   // git writes its progress/errors to stderr but `onOutput` does not expose
-  // which stream a chunk came from, so all git chunks are recorded as stderr.
+  // which stream a chunk came from, so all chunks are recorded as stderr. The
+  // writer collapses `\r` spinner frames and repeated percentage progress lines,
+  // so a clone/pull/init does not flood the log with redraws.
+  const writer = createProgressWriter((line) =>
+    registry.append(jobId, {
+      ...(currentStep ? { stepId: currentStep } : {}),
+      stream: 'stderr',
+      text: line,
+    }),
+  );
   const runner: GitRunner = (args, opts) =>
-    base(args, {
-      ...(opts ?? {}),
-      onOutput: (chunk) =>
-        registry.append(jobId, {
-          ...(currentStep ? { stepId: currentStep } : {}),
-          stream: 'stderr',
-          text: chunk,
-        }),
-    });
+    base(args, { ...(opts ?? {}), onOutput: (chunk) => writer.push(chunk) });
 
   const onStep: OnStep = (info) => {
     registry.addStep(jobId, info);
@@ -96,18 +97,11 @@ function beginJob(
   };
 
   void (async () => {
-    let sink: ProgressWriter | undefined;
     try {
       registry.append(jobId, { stream: 'info', text: `任务已启动：${label}` });
-      let codegraph = deps.codegraph;
-      if (!codegraph) {
-        // codegraph redraws progress with bare `\r` plus ANSI color/erase codes;
-        // collapse each logical line to its final frame so logs stay readable.
-        const writer = createProgressWriter((line) =>
-          registry.append(jobId, { stream: 'stderr', text: line }),
-        );
-        sink = writer;
-        codegraph = await createCodegraphHook({
+      const codegraph =
+        deps.codegraph ??
+        (await createCodegraphHook({
           ...(deps.codegraphRunner ? { runner: deps.codegraphRunner } : {}),
           ...(deps.commandRunner ? { commandRunner: deps.commandRunner } : {}),
           ...(deps.codegraphBin ? { bin: deps.codegraphBin } : {}),
@@ -116,13 +110,12 @@ function beginJob(
         }).catch((err) => {
           log.fail('workspace', err, { step: 'codegraph-hook', jobId });
           return undefined;
-        });
-      }
+        }));
       const result = await work(runner, onStep, codegraph);
-      sink?.flush();
+      writer.flush();
       registry.finish(jobId, result);
     } catch (err) {
-      sink?.flush();
+      writer.flush();
       registry.fail(jobId, err instanceof Error ? err.message : String(err));
       log.fail('workspace', err, { step: 'workspace-job', jobId });
     }
