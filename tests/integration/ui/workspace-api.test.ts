@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -58,6 +58,13 @@ async function makeOrigin(base: string): Promise<string> {
   git(seed, ['push', '-u', 'origin', 'main']);
   git(origin, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
   return origin;
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  return stat(p).then(
+    () => true,
+    () => false,
+  );
 }
 
 describe('workspace-api', { timeout: 30_000 }, () => {
@@ -143,6 +150,96 @@ describe('workspace-api', { timeout: 30_000 }, () => {
     const state = await loadProfileState('claude', rootDir);
     await setWorkspaceDir('claude', rootDir, { path: workspace }, state);
     expect(state.profileConfig.workspaces.default).toBe(await realpath(workspace));
+  });
+
+  it('deletes the checkout when deleteDir is true', async () => {
+    const origin = await makeOrigin(rootDir);
+    const added = await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'gone' }] });
+    const id = added.projects[0]!.id;
+    const dir = join(workspace, 'gone');
+    expect(await pathExists(dir)).toBe(true);
+
+    const view = await removeProject('claude', rootDir, { id, deleteDir: true });
+
+    expect(await pathExists(dir)).toBe(false);
+    expect(view.projects).toHaveLength(0);
+    expect((await projectsView('claude', rootDir)).projects).toHaveLength(0);
+    expect(view.removed).toMatchObject({ id, deleted: true });
+    expect(view.removed.dir).toBe(dir);
+  });
+
+  it('keeps the checkout when deleteDir is omitted or false', async () => {
+    const origin = await makeOrigin(rootDir);
+    const first = await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'keepA' }] });
+    const idA = first.projects[0]!.id;
+    const second = await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'keepB' }] });
+    const idB = second.projects.find((p) => p.name === 'keepB')!.id;
+
+    const defaulted = await removeProject('claude', rootDir, { id: idA });
+    expect(defaulted.removed.deleted).toBe(false);
+    expect(await pathExists(join(workspace, 'keepA'))).toBe(true);
+
+    const explicit = await removeProject('claude', rootDir, { id: idB, deleteDir: false });
+    expect(explicit.removed.deleted).toBe(false);
+    expect(await pathExists(join(workspace, 'keepB'))).toBe(true);
+    expect(explicit.projects).toHaveLength(0);
+  });
+
+  it('deletes a checkout that has uncommitted changes', async () => {
+    const origin = await makeOrigin(rootDir);
+    const added = await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'dirty' }] });
+    const id = added.projects[0]!.id;
+    const dir = join(workspace, 'dirty');
+    await writeFile(join(dir, 'untracked.txt'), 'wip', 'utf8');
+
+    const view = await removeProject('claude', rootDir, { id, deleteDir: true });
+
+    expect(view.removed.deleted).toBe(true);
+    expect(await pathExists(dir)).toBe(false);
+  });
+
+  it('skips deletion when the project points at the workspace root', async () => {
+    const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
+    await writeFile(
+      appPaths.projectsFile,
+      JSON.stringify({
+        version: 1,
+        projects: [
+          { id: 'root-proj', name: 'root', repoUrl: 'https://e/x.git', localPath: '.', branch: 'main' },
+        ],
+      }),
+      'utf8',
+    );
+
+    const view = await removeProject('claude', rootDir, { id: 'root-proj', deleteDir: true });
+
+    expect(await pathExists(workspace)).toBe(true);
+    expect(view.projects).toHaveLength(0);
+    expect(view.removed.deleted).toBe(false);
+    expect(view.removed.warning).toBeTruthy();
+  });
+
+  it('skips deletion for a path that escapes the workspace', async () => {
+    const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
+    const outside = join(rootDir, 'outside');
+    await mkdir(outside, { recursive: true });
+    await writeFile(
+      appPaths.projectsFile,
+      JSON.stringify({
+        version: 1,
+        projects: [
+          { id: 'esc', name: 'esc', repoUrl: 'https://e/x.git', localPath: '../outside', branch: 'main' },
+        ],
+      }),
+      'utf8',
+    );
+
+    const view = await removeProject('claude', rootDir, { id: 'esc', deleteDir: true });
+
+    expect(await pathExists(outside)).toBe(true);
+    expect(view.projects).toHaveLength(0);
+    expect(view.removed.deleted).toBe(false);
+    expect(view.removed.warning).toBeTruthy();
   });
 });
 

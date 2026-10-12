@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveAppPaths } from '../config/app-paths';
 import { saveWorkspaceConfig, type MutableProfileState } from '../config/config-ops';
@@ -59,6 +59,14 @@ export interface ProjectsView {
   workspaceDir?: string;
   projects: ProjectView[];
   schedule: PullSchedule;
+}
+
+/** Outcome of a project removal, mirroring whether the checkout was deleted. */
+export interface RemovedResult {
+  id: string;
+  dir?: string;
+  deleted: boolean;
+  warning?: string;
 }
 
 export interface PullRunItem {
@@ -204,13 +212,46 @@ export async function removeProject(
   profile: string,
   rootDir: string | undefined,
   body: unknown,
-): Promise<ProjectsView> {
+): Promise<ProjectsView & { removed: RemovedResult }> {
   const id = readId(body);
-  await withProjectStore(profile, rootDir, async (store) => {
-    if (!store.remove(id)) throw new HttpError(404, `项目不存在：${id}`);
+  const deleteDir = (body as { deleteDir?: unknown })?.deleteDir === true;
+  const removed = await withProjectStore(profile, rootDir, async (store, workspaceDir) => {
+    const entry = store.get(id);
+    if (!entry) throw new HttpError(404, `项目不存在：${id}`);
+    // Delete the checkout first so a failure keeps the record for a retry.
+    const result = deleteDir ? await deleteProjectDir(workspaceDir, entry) : { id, deleted: false };
+    store.remove(id);
     await store.flush();
+    return result;
   });
-  return projectsView(profile, rootDir);
+  return { ...(await projectsView(profile, rootDir)), removed };
+}
+
+/**
+ * Recursively delete a project's checkout. Refuses paths that resolve outside
+ * the workspace or that equal the workspace root itself; a missing directory is
+ * treated as already deleted. A real failure throws so the caller keeps the
+ * record.
+ */
+async function deleteProjectDir(workspaceDir: string, entry: ProjectEntry): Promise<RemovedResult> {
+  let dir: string;
+  try {
+    dir = resolveProjectDir(workspaceDir, entry.localPath);
+  } catch {
+    return { id: entry.id, deleted: false, warning: '项目目录位于工作空间之外，已保留未删除' };
+  }
+  if (dir === resolve(workspaceDir)) {
+    return { id: entry.id, dir, deleted: false, warning: '项目目录与工作空间根目录相同，已保留未删除' };
+  }
+  const info = await stat(dir).catch(() => undefined);
+  if (!info) return { id: entry.id, dir, deleted: true };
+  try {
+    await rm(dir, { recursive: true, force: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new HttpError(400, `删除目录失败：${message}`);
+  }
+  return { id: entry.id, dir, deleted: true };
 }
 
 export async function updateProjectBranch(

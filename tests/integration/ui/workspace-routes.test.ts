@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -129,6 +129,24 @@ describe('workspace routes', { timeout: 30_000 }, () => {
 
     const removed = await json(await post('/api/projects/remove', { id }));
     expect(removed.projects).toHaveLength(0);
+  });
+
+  it('removes a project and deletes its directory when deleteDir is true', async () => {
+    const origin = await makeOrigin(rootDir);
+    const created = await post('/api/projects', { projects: [{ repoUrl: origin, name: 'x' }] });
+    const { jobId } = await json(created);
+    const snap = await waitForJob(jobId);
+    expect(snap.status).toBe('succeeded');
+
+    const dir = join(workspace, 'x');
+    const exists = () => stat(dir).then(() => true, () => false);
+    expect(await exists()).toBe(true);
+
+    const listed = await json(await get('/api/projects'));
+    const removed = await json(await post('/api/projects/remove', { id: listed.projects[0].id, deleteDir: true }));
+    expect(removed.projects).toHaveLength(0);
+    expect(removed.removed.deleted).toBe(true);
+    expect(await exists()).toBe(false);
   });
 
   it('pulls projects via the pull route and records a pull job', async () => {
