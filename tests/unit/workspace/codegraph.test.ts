@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -8,6 +8,7 @@ import {
   createCodegraphHook,
   defaultCodegraphBin,
   detectCli,
+  ensureCodegraphExcluded,
   hasCodegraphMcp,
   initProject,
   mcpStatus,
@@ -276,5 +277,28 @@ describe('createCodegraphHook', () => {
     });
     await hook.installCli('script');
     expect(cli.calls).toEqual([['--version'], ['--version']]);
+  });
+
+  it('excludes .codegraph/ in .git/info/exclude after a successful init', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'codegraph-exclude-'));
+    cleanups.push(dir);
+    await mkdir(join(dir, '.git', 'info'), { recursive: true });
+    const cli = fakeCli(true);
+    const hook = await createCodegraphHook({
+      runner: cli.runner,
+      resolve: async () => '/x/codegraph',
+      mcp: async () => ({ state: 'installed' }),
+    });
+    await hook.init(dir);
+    await hook.init(dir); // idempotent
+    const exclude = await readFile(join(dir, '.git', 'info', 'exclude'), 'utf8');
+    expect(exclude.split(/\r?\n/).filter((l) => l.trim() === '.codegraph/')).toHaveLength(1);
+  });
+
+  it('does not touch non-git directories', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'codegraph-exclude-'));
+    cleanups.push(dir);
+    await ensureCodegraphExcluded(dir);
+    await expect(readFile(join(dir, '.git', 'info', 'exclude'), 'utf8')).rejects.toThrow();
   });
 });

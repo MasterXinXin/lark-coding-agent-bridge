@@ -23,7 +23,12 @@ import {
   type PullTrigger,
 } from '../workspace/history';
 import { browseDirectory } from '../workspace/dir-browse';
-import { projectIndexInfo, type CodegraphIndexInfo } from '../workspace/codegraph';
+import {
+  ensureCodegraphExcluded,
+  projectIndexInfo,
+  type CodegraphHook,
+  type CodegraphIndexInfo,
+} from '../workspace/codegraph';
 import { ProjectStore, type ProjectEntry, type PullSchedule } from '../workspace/projects';
 import { HttpError } from './http';
 import { loadProfileState } from './api';
@@ -166,6 +171,7 @@ export async function addProjects(
   body: unknown,
   runner: GitRunner = run,
   onStep?: (info: { id: string; name: string }) => void,
+  codegraph?: CodegraphHook,
 ): Promise<ProjectsView> {
   const raw = body as { projects?: unknown };
   const items = Array.isArray(raw?.projects) ? raw.projects : [];
@@ -212,6 +218,20 @@ export async function addProjects(
         store.remove(entry.id);
         await store.flush().catch(() => undefined);
         throw new HttpError(400, err instanceof Error ? err.message : String(err));
+      }
+      if (codegraph?.available) {
+        // Indexing is best-effort: a failure must not roll back a clone that
+        // succeeded, so it only logs and the row shows "未索引" for a retry.
+        try {
+          if (!(await projectIndexInfo(dir)).indexed) {
+            const indexed = await codegraph.init(dir);
+            if (!indexed.ok) {
+              log.warn('workspace', 'codegraph-init-failed', { id: entry.id, detail: indexed.detail });
+            }
+          }
+        } catch (err) {
+          log.warn('workspace', 'codegraph-init-failed', { id: entry.id, err: String(err) });
+        }
       }
     }
     await store.flush();
@@ -334,6 +354,7 @@ export async function pullProjects(
   runner: GitRunner = run,
   onStep?: (info: { id: string; name: string }) => void,
   trigger: PullTrigger = 'manual',
+  codegraph?: CodegraphHook,
 ): Promise<{ results: PullRunItem[] }> {
   const { appPaths, workspaceDir, store } = await statePaths(profile, rootDir);
   const schedule = store.getSchedule();
@@ -359,9 +380,36 @@ export async function pullProjects(
         result = 'failed';
         detail = '目录不存在或不是 git 仓库，请重新添加项目';
       } else {
+        if ((await projectIndexInfo(dir)).indexed) {
+          // A legacy index leaves `.codegraph/` untracked and blocks ff-only
+          // pulls; exclude it locally so the repo is clean again.
+          await ensureCodegraphExcluded(dir).catch(() => undefined);
+        }
         const outcome = await pullRepo(projectRun, dir, schedule.strategy);
         result = outcome.status;
         detail = outcome.detail;
+        if (outcome.status === 'updated' && codegraph?.available) {
+          // Only a real update needs re-indexing; "up-to-date"/"skipped" do not.
+          // A sync failure must not downgrade a successful pull, so swallow+log.
+          try {
+            if ((await projectIndexInfo(dir)).indexed) {
+              const synced = await codegraph.sync(dir);
+              if (!synced.ok) {
+                log.warn('workspace', 'codegraph-sync-failed', {
+                  id: project.id,
+                  detail: synced.detail,
+                });
+              }
+            } else {
+              log.info('workspace', 'codegraph-sync-skipped', {
+                id: project.id,
+                reason: 'not-indexed',
+              });
+            }
+          } catch (err) {
+            log.warn('workspace', 'codegraph-sync-failed', { id: project.id, err: String(err) });
+          }
+        }
       }
     } catch (err) {
       result = 'failed';

@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { resolveExecutablePath } from '../cli/agent-detection';
@@ -365,6 +365,36 @@ export async function syncProject(
     : { ok: false, detail: failureDetail(result, 'codegraph sync 失败') };
 }
 
+const CODEGRAPH_IGNORE = '.codegraph';
+
+/**
+ * `codegraph init` leaves an untracked `.codegraph/` in the checkout, which
+ * makes `git status` dirty; `pullRepo --ff-only` then refuses to run and the
+ * project never syncs. `.git/info/exclude` is repo-local and itself untracked,
+ * so ignoring there keeps pulls working without editing a tracked `.gitignore`
+ * (which would dirty the tree just the same). No-op for non-git directories.
+ */
+export async function ensureCodegraphExcluded(dir: string): Promise<void> {
+  const gitDir = join(dir, '.git');
+  try {
+    if (!(await stat(gitDir)).isDirectory()) return;
+  } catch {
+    return;
+  }
+  const excludePath = join(gitDir, 'info', 'exclude');
+  let current = '';
+  try {
+    current = await readFile(excludePath, 'utf8');
+  } catch {
+    // Missing exclude file: created below.
+  }
+  const lines = current.split(/\r?\n/).map((line) => line.trim());
+  if (lines.includes(CODEGRAPH_IGNORE) || lines.includes(`${CODEGRAPH_IGNORE}/`)) return;
+  await mkdir(join(gitDir, 'info'), { recursive: true });
+  const prefix = current.length > 0 && !current.endsWith('\n') ? '\n' : '';
+  await writeFile(excludePath, `${current}${prefix}${CODEGRAPH_IGNORE}/\n`, 'utf8');
+}
+
 export type CodegraphInstallMethod = 'script' | 'npm';
 
 /** The official install command for a platform, as `command` + `args`. */
@@ -434,7 +464,11 @@ export async function createCodegraphHook(
   return {
     available: cli.installed,
     ...(cli.version ? { version: cli.version } : {}),
-    init: (dir) => initProject(runner, dir, onOutput),
+    init: async (dir) => {
+      const result = await initProject(runner, dir, onOutput);
+      if (result.ok) await ensureCodegraphExcluded(dir).catch(() => undefined);
+      return result;
+    },
     sync: (dir) => syncProject(runner, dir, onOutput),
     wireMcp,
     installCli: async (method) => {
