@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveAppPaths } from '../../../src/config/app-paths';
 import type { PullRecord } from '../../../src/workspace/history';
 import { ProjectStore, type PullSchedule } from '../../../src/workspace/projects';
@@ -340,5 +340,68 @@ describe('PullScheduler', () => {
 
     await expect(scheduler.tick()).resolves.toBeUndefined();
     expect(runs).toEqual(['claude']);
+  });
+
+  it('seeds from the newest scheduled record, not the oldest', async () => {
+    const now = 1_700_000_000_000;
+    await writeSchedule('claude', { enabled: true, intervalMinutes: 30 });
+    // File order is oldest → newest; the recent one must win.
+    await writeHistory('claude', [
+      record('schedule', now - 31 * 60_000),
+      record('schedule', now - 60_000),
+    ]);
+    const runs: string[] = [];
+    const scheduler = new PullScheduler({
+      rootDir,
+      now: () => now,
+      listProfiles: async () => ['claude'],
+      runProfile: async (profile) => {
+        runs.push(profile);
+        return [];
+      },
+      checkGit: async () => true,
+    });
+
+    await scheduler.tick();
+    expect(runs).toEqual([]);
+  });
+
+  it('is due when there is no history file at all', async () => {
+    const now = 1_700_000_000_000;
+    await writeSchedule('claude', { enabled: true, intervalMinutes: 30 });
+    const runs: string[] = [];
+    const scheduler = new PullScheduler({
+      rootDir,
+      now: () => now,
+      listProfiles: async () => ['claude'],
+      runProfile: async (profile) => {
+        runs.push(profile);
+        return [];
+      },
+      checkGit: async () => true,
+    });
+
+    await scheduler.tick();
+    expect(runs).toEqual(['claude']);
+  });
+
+  it('does not seed history for a disabled schedule', async () => {
+    await writeSchedule('claude', { enabled: false, intervalMinutes: 30 });
+    const seedLastRun = vi.fn(async () => undefined);
+    const runs: string[] = [];
+    const scheduler = new PullScheduler({
+      rootDir,
+      listProfiles: async () => ['claude'],
+      runProfile: async (profile) => {
+        runs.push(profile);
+        return [];
+      },
+      seedLastRun,
+      checkGit: async () => true,
+    });
+
+    await scheduler.tick();
+    expect(seedLastRun).not.toHaveBeenCalled();
+    expect(runs).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ import { log } from '../core/logger';
 import { createGitRunner } from '../git/git-ops';
 import { listAllProfiles } from '../runtime/profile-discovery';
 import { pullProjects } from '../ui/workspace-api';
-import { readPullRecords, type PullResult } from './history';
+import { MAX_RECORDS, readPullRecords, type PullResult } from './history';
 import { ProjectStore, type PullSchedule } from './projects';
 
 export interface ScheduledRunItem {
@@ -52,7 +52,7 @@ export async function latestScheduledRunAt(
   rootDir?: string,
 ): Promise<number | undefined> {
   const appPaths = resolveAppPaths({ rootDir, profile });
-  const records = await readPullRecords(appPaths.pullHistoryFile, 200);
+  const records = await readPullRecords(appPaths.pullHistoryFile, MAX_RECORDS);
   const newest = records.find((r) => r.trigger === 'schedule');
   if (!newest) return undefined;
   const ts = Date.parse(newest.ts);
