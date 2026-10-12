@@ -31,3 +31,6 @@ tests-smoke/
 
 # Git worktrees used for isolated feature branches
 .worktrees/
+
+# Codegraph index (machine-local tool data)
+.codegraph/
