@@ -146,6 +146,7 @@ export async function addProjects(
   rootDir: string | undefined,
   body: unknown,
   runner: GitRunner = run,
+  onStep?: (info: { id: string; name: string }) => void,
 ): Promise<ProjectsView> {
   const raw = body as { projects?: unknown };
   const items = Array.isArray(raw?.projects) ? raw.projects : [];
@@ -177,6 +178,7 @@ export async function addProjects(
       } catch (err) {
         throw new HttpError(400, err instanceof Error ? err.message : String(err));
       }
+      onStep?.({ id: entry.id, name: entry.name });
       const env = entry.accountId
         ? await gitEnvForAccount(entry.accountId, hostStorePaths(rootDir), usernames.get(entry.accountId))
         : undefined;
@@ -255,6 +257,7 @@ export async function pullProjects(
   rootDir: string | undefined,
   body: unknown,
   runner: GitRunner = run,
+  onStep?: (info: { id: string; name: string }) => void,
 ): Promise<{ results: PullRunItem[] }> {
   const { appPaths, workspaceDir, store } = await statePaths(profile, rootDir);
   const schedule = store.getSchedule();
@@ -266,6 +269,7 @@ export async function pullProjects(
 
   const results: PullRunItem[] = [];
   for (const project of targets) {
+    onStep?.({ id: project.id, name: project.name });
     const startedAt = Date.now();
     let result: PullResult;
     let detail: string;
