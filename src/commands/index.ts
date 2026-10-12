@@ -87,6 +87,17 @@ import type { ProcessPool } from '../bot/process-pool';
 import type { RunExecutor } from '../runtime/run-executor';
 import { RunRejected } from '../runtime/errors';
 import { validateAppCredentials } from '../utils/feishu-auth';
+import {
+  addProjects,
+  pullProjects,
+  removeProject,
+  resolveProjectId,
+  setSchedule,
+  updateProjectBranch,
+  type PullRunItem,
+} from '../ui/workspace-api';
+import { browseDirectory } from '../workspace/dir-browse';
+import type { PullSchedule } from '../workspace/projects';
 import type { WorkspaceStore } from '../workspace/store';
 import { createBoundChat, defaultChatName } from '../bot/group';
 import { fetchKnownChats, type KnownChat } from '../bot/lark-info';
@@ -181,6 +192,7 @@ const handlers: Record<string, Handler> = {
   '/reset': handleNew,
   '/cd': handleCd,
   '/ws': handleWs,
+  '/project': handleProject,
   '/resume': handleResume,
   '/status': handleStatus,
   '/help': handleHelp,
@@ -213,6 +225,7 @@ const ADMIN_COMMANDS = new Set([
   '/doctor',
   '/cd',
   '/ws',
+  '/project',
   '/invite',
   '/remove',
   // Joining a meeting makes the bot visible to every participant and exposes
@@ -489,8 +502,193 @@ async function handleWs(args: string, ctx: CommandContext): Promise<void> {
     case 'remove':
     case 'rm':
       return handleWsRemove(name, ctx);
+    case 'dir':
+      return handleWsDir(name, ctx);
+    case 'pull':
+      return handleWsPull(name, ctx);
+    case 'schedule':
+      return handleWsSchedule(name, ctx);
     default:
-      await reply(ctx, '用法：`/ws [list|save <name>|use <name>|remove <name>]`');
+      await reply(
+        ctx,
+        '用法：`/ws [list|save <name>|use <name>|remove <name>|dir <路径>|pull [项目名]|schedule on|off|<分钟>]`',
+      );
+  }
+}
+
+/** The profile + root dir the workspace commands read project state from. */
+function workspaceTarget(ctx: CommandContext): { profile: string; rootDir: string } {
+  return { profile: ctx.controls.profile, rootDir: dirname(ctx.controls.configPath) };
+}
+
+async function handleWsDir(path: string, ctx: CommandContext): Promise<void> {
+  if (!path) {
+    await reply(ctx, '用法：`/ws dir <绝对路径>`');
+    return;
+  }
+  const listing = await browseDirectory(path).catch(() => undefined);
+  if (!listing) {
+    await reply(ctx, `目录不存在或不可访问：${path}`);
+    return;
+  }
+  try {
+    await configOps.saveWorkspaceConfig(ctx.controls, listing.path);
+  } catch (err) {
+    await reply(ctx, err instanceof Error ? err.message : String(err));
+    return;
+  }
+  await reply(
+    ctx,
+    `✓ 工作空间根目录已设为 \`${listing.path}\`\n（新项目默认在此目录下检出；也是 \`/cd\` 的默认）`,
+  );
+}
+
+const PULL_RESULT_LABELS: Record<PullRunItem['result'], string> = {
+  updated: '更新',
+  'up-to-date': '已最新',
+  skipped: '跳过',
+  failed: '失败',
+};
+
+async function handleWsPull(name: string, ctx: CommandContext): Promise<void> {
+  const { profile, rootDir } = workspaceTarget(ctx);
+  const id = name
+    ? await resolveProjectId(profile, rootDir, name).catch(() => undefined)
+    : undefined;
+  if (name && !id) {
+    await reply(ctx, `未找到项目：${name}`);
+    return;
+  }
+
+  let results: PullRunItem[];
+  try {
+    ({ results } = await pullProjects(profile, rootDir, id ? { id } : {}));
+  } catch (err) {
+    await reply(ctx, err instanceof Error ? err.message : String(err));
+    return;
+  }
+  if (results.length === 0) {
+    await reply(ctx, '没有可拉取的项目。');
+    return;
+  }
+
+  const counts = new Map<PullRunItem['result'], number>();
+  for (const item of results) counts.set(item.result, (counts.get(item.result) ?? 0) + 1);
+  const summary = [...counts.entries()]
+    .map(([result, count]) => `${PULL_RESULT_LABELS[result]} ${count}`)
+    .join(' / ');
+  const lines = [`✓ 拉取完成（${results.length} 个项目）：${summary}`];
+  for (const item of results) {
+    if (item.result === 'failed') lines.push(`- ${item.name}：${item.detail}`);
+  }
+  await reply(ctx, lines.join('\n'));
+}
+
+async function handleWsSchedule(arg: string, ctx: CommandContext): Promise<void> {
+  const { profile, rootDir } = workspaceTarget(ctx);
+  const value = arg.trim();
+  let schedule: PullSchedule;
+  try {
+    if (value === 'on') {
+      schedule = await setSchedule(profile, rootDir, { enabled: true });
+    } else if (value === 'off') {
+      schedule = await setSchedule(profile, rootDir, { enabled: false });
+    } else if (/^\d+$/.test(value)) {
+      schedule = await setSchedule(profile, rootDir, {
+        enabled: true,
+        intervalMinutes: Number(value),
+      });
+    } else {
+      await reply(ctx, '用法：`/ws schedule on|off|<分钟>`');
+      return;
+    }
+  } catch (err) {
+    await reply(ctx, err instanceof Error ? err.message : String(err));
+    return;
+  }
+  await reply(
+    ctx,
+    schedule.enabled
+      ? `✓ 定时拉取已开启：每 ${schedule.intervalMinutes} 分钟（策略 ${schedule.strategy}）`
+      : '✓ 定时拉取已关闭',
+  );
+}
+
+async function handleProject(args: string, ctx: CommandContext): Promise<void> {
+  const parts = args.trim().split(/\s+/);
+  const sub = parts[0] ?? '';
+  switch (sub) {
+    case 'add': {
+      const repoUrl = parts[1] ?? '';
+      const branch = parts.slice(2).join(' ').trim();
+      if (!repoUrl) {
+        await reply(ctx, '用法：`/project add <仓库地址> [分支]`');
+        return;
+      }
+      const { profile, rootDir } = workspaceTarget(ctx);
+      try {
+        const view = await addProjects(profile, rootDir, {
+          projects: [{ repoUrl, ...(branch ? { branch } : {}) }],
+        });
+        const added =
+          view.projects.find((p) => p.repoUrl === repoUrl) ??
+          view.projects[view.projects.length - 1];
+        await reply(
+          ctx,
+          `✓ 已添加项目 \`${added?.name ?? repoUrl}\`（分支 ${added?.branch ?? (branch || 'main')}）`,
+        );
+      } catch (err) {
+        await reply(ctx, `添加失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+    case 'rm':
+    case 'remove': {
+      const name = parts.slice(1).join(' ').trim();
+      if (!name) {
+        await reply(ctx, '用法：`/project rm <项目名>`');
+        return;
+      }
+      const { profile, rootDir } = workspaceTarget(ctx);
+      const id = await resolveProjectId(profile, rootDir, name).catch(() => undefined);
+      if (!id) {
+        await reply(ctx, `未找到项目：${name}`);
+        return;
+      }
+      try {
+        await removeProject(profile, rootDir, { id });
+        await reply(ctx, `✓ 已移除项目 \`${name}\`（未删除磁盘目录）`);
+      } catch (err) {
+        await reply(ctx, `移除失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+    case 'branch': {
+      const name = parts[1] ?? '';
+      const branch = parts.slice(2).join(' ').trim();
+      if (!name || !branch) {
+        await reply(ctx, '用法：`/project branch <项目名> <分支>`');
+        return;
+      }
+      const { profile, rootDir } = workspaceTarget(ctx);
+      const id = await resolveProjectId(profile, rootDir, name).catch(() => undefined);
+      if (!id) {
+        await reply(ctx, `未找到项目：${name}`);
+        return;
+      }
+      try {
+        await updateProjectBranch(profile, rootDir, { id, branch });
+        await reply(ctx, `✓ 已把 \`${name}\` 的分支改为 \`${branch}\``);
+      } catch (err) {
+        await reply(ctx, `改分支失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+    default:
+      await reply(
+        ctx,
+        '用法：`/project add <仓库地址> [分支]` | `/project rm <项目名>` | `/project branch <项目名> <分支>`',
+      );
   }
 }
 

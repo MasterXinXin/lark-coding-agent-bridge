@@ -1,12 +1,15 @@
-import { mkdir, realpath, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { mkdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizedMessage } from '@larksuite/channel';
 import { ActiveRuns } from '../../../src/bot/active-runs.js';
 import { tryHandleCommand, type CommandContext, type Controls } from '../../../src/commands/index.js';
+import { resolveAppPaths } from '../../../src/config/app-paths.js';
 import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
 import { createRootConfig, loadRootConfig, saveRootConfig } from '../../../src/config/profile-store.js';
 import { SessionStore } from '../../../src/session/store.js';
+import { ProjectStore } from '../../../src/workspace/projects.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { createFakeAgent } from '../../helpers/fake-agent.js';
 import { createFakeChannel, type FakeChannel } from '../../helpers/fake-channel.js';
@@ -326,7 +329,136 @@ describe('Bridge command contracts', () => {
     });
     expect(h.workspaces.cwdFor('oc_fake_chat_1')).toBe(h.controls.profileConfig.workspaces.default);
   });
+
+  it('sets the workspace root through /ws dir', async () => {
+    const h = await createHarness();
+    const target = join(h.tmp.root, 'new-workspace');
+    await mkdir(target, { recursive: true });
+    const targetReal = await realpath(target);
+
+    await expect(h.run(`/ws dir ${target}`)).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('工作空间根目录已设为');
+    expect(lastMarkdown(h.channel)).toContain(targetReal);
+
+    const root = await loadRootConfig(h.controls.configPath);
+    expect(root?.profiles.claude?.workspaces.default).toBe(targetReal);
+
+    await expect(h.run('/ws dir /no/such/dir')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('目录不存在或不可访问');
+  });
+
+  it('toggles and sets the pull schedule through /ws schedule', async () => {
+    const h = await createHarness();
+
+    await expect(h.run('/ws schedule on')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('定时拉取已开启');
+    expect((await loadProjectStore(h)).getSchedule().enabled).toBe(true);
+
+    await expect(h.run('/ws schedule off')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('定时拉取已关闭');
+    expect((await loadProjectStore(h)).getSchedule().enabled).toBe(false);
+
+    await expect(h.run('/ws schedule 30')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('每 30 分钟');
+    expect((await loadProjectStore(h)).getSchedule()).toMatchObject({
+      enabled: true,
+      intervalMinutes: 30,
+    });
+
+    await expect(h.run('/ws schedule bogus')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('用法');
+  });
+
+  it('removes, re-branches, and rejects unknown projects through /project', async () => {
+    const h = await createHarness();
+    await seedProject(h, 'api');
+
+    await expect(h.run('/project branch api release')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('已把 `api` 的分支改为 `release`');
+    expect((await loadProjectStore(h)).list()[0]?.branch).toBe('release');
+
+    await expect(h.run('/project rm api')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('已移除项目');
+    expect((await loadProjectStore(h)).list()).toHaveLength(0);
+
+    await expect(h.run('/project rm ghost')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('未找到项目');
+
+    await expect(h.run('/project branch ghost main')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('未找到项目');
+  });
+
+  it('reports unknown and failed projects through /ws pull', async () => {
+    const h = await createHarness();
+    await seedProject(h, 'missing');
+
+    await expect(h.run('/ws pull ghost')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('未找到项目');
+
+    await expect(h.run('/ws pull')).resolves.toBe(true);
+    const md = lastMarkdown(h.channel);
+    expect(md).toContain('失败');
+    expect(md).toContain('missing');
+  });
+
+  it('adds a project from a local origin through /project add', async () => {
+    const h = await createHarness();
+    const origin = await makeOrigin(h.tmp.root);
+
+    await expect(h.run(`/project add ${origin} main`)).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('已添加项目');
+
+    const checkout = join(await realpath(h.tmp.workspace), 'origin');
+    expect(await pathExists(checkout)).toBe(true);
+  });
 });
+
+/** Load a profile's project store from the harness config's root dir. */
+async function loadProjectStore(h: Harness): Promise<ProjectStore> {
+  const appPaths = resolveAppPaths({
+    rootDir: dirname(h.controls.configPath),
+    profile: 'claude',
+  });
+  const store = new ProjectStore(appPaths.projectsFile);
+  await store.load();
+  return store;
+}
+
+/** Seed one project (defaulting the checkout to a non-existent, non-git dir). */
+async function seedProject(h: Harness, name: string): Promise<void> {
+  const appPaths = resolveAppPaths({
+    rootDir: dirname(h.controls.configPath),
+    profile: 'claude',
+  });
+  const store = new ProjectStore(appPaths.projectsFile);
+  await store.load();
+  store.add({ repoUrl: `https://example.com/acme/${name}.git`, name, branch: 'main' });
+  await store.flush();
+}
+
+function git(cwd: string, args: string[]): void {
+  execFileSync('git', args, { cwd, stdio: 'pipe', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } });
+}
+
+/** Real local bare origin with one commit on `main`. */
+async function makeOrigin(base: string): Promise<string> {
+  const origin = join(base, 'origin.git');
+  git(base, ['init', '--bare', origin]);
+  const seed = join(base, 'seed');
+  git(base, ['clone', origin, seed]);
+  git(seed, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-m', 'init']);
+  git(seed, ['branch', '-M', 'main']);
+  git(seed, ['push', '-u', 'origin', 'main']);
+  git(origin, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  return origin;
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  return stat(p).then(
+    () => true,
+    () => false,
+  );
+}
 
 async function createHarness(): Promise<Harness> {
   const tmp = await createTmpProfile('commands-v1-');

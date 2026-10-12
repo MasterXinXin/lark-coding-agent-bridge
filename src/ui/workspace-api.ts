@@ -408,6 +408,24 @@ export async function setSchedule(
   });
 }
 
+/**
+ * Resolve a project by id or unique name within a profile. Names are unique
+ * per profile (`ProjectStore.add` rejects duplicates), so a name maps to at
+ * most one entry. Throws 404 when neither matches.
+ */
+export async function resolveProjectId(
+  profile: string,
+  rootDir: string | undefined,
+  ref: string,
+): Promise<string> {
+  const { store } = await statePaths(profile, rootDir);
+  const byId = store.get(ref);
+  if (byId) return byId.id;
+  const byName = store.list().find((p) => p.name === ref);
+  if (byName) return byName.id;
+  throw new HttpError(404, `项目不存在：${ref}`);
+}
+
 function readId(body: unknown): string {
   const raw = body as { id?: unknown };
   const id = typeof raw?.id === 'string' ? raw.id.trim() : '';

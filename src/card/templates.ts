@@ -189,6 +189,8 @@ export function helpCard(agentName = 'Agent'): object {
         '- `/resume [N]` — 列出并恢复历史会话（最多 N 条）',
         '- `/cd <path>` — 切换工作目录（会重置 session）',
         '- `/ws list|save <name>|use <name>|remove <name>` — 工作目录',
+        '- `/ws dir <路径>|pull [项目名]|schedule on|off|<分钟>` — 工作空间根目录 / 拉取 / 定时',
+        '- `/project add <仓库地址> [分支]|rm <项目名>|branch <项目名> <分支>` — 管理项目',
         '- `/account` — 查看当前应用；`/account change` 换 appId/secret 并重连',
         '- `/config` — 调整偏好、访问控制和 lark-cli 身份策略',
         '- `/status` — 当前状态',
