@@ -4,13 +4,17 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   EMPTY_CODEGRAPH_STATS,
+  buildInstallCommand,
+  createCodegraphHook,
   defaultCodegraphBin,
   detectCli,
   hasCodegraphMcp,
+  initProject,
   mcpStatus,
   parseJsonc,
   projectIndexInfo,
   projectStats,
+  syncProject,
   type CodegraphResult,
   type CodegraphRunner,
 } from '../../../src/workspace/codegraph';
@@ -191,5 +195,86 @@ describe('projectStats', () => {
     const dir = await indexedDir();
     const { runner } = recordingRunner(() => ({ code: 0, stdout: 'not json' }));
     expect(await projectStats(runner, dir)).toEqual(EMPTY_CODEGRAPH_STATS);
+  });
+});
+
+describe('initProject / syncProject', () => {
+  it('runs init then sync against a directory', async () => {
+    const { runner, calls } = recordingRunner(() => ({ code: 0 }));
+    expect(await initProject(runner, '/p')).toEqual({ ok: true });
+    expect(await syncProject(runner, '/p')).toEqual({ ok: true });
+    expect(calls).toEqual([['init', '/p'], ['sync', '/p']]);
+  });
+
+  it('surfaces stderr as the failure detail', async () => {
+    const { runner } = recordingRunner(() => ({ code: 2, stderr: 'nope' }));
+    expect(await initProject(runner, '/p')).toEqual({ ok: false, detail: 'nope' });
+  });
+});
+
+describe('buildInstallCommand', () => {
+  it('uses npm for the npm method', () => {
+    expect(buildInstallCommand('npm', 'darwin')).toEqual({
+      command: 'npm',
+      args: ['i', '-g', '@colbymchenry/codegraph'],
+    });
+  });
+
+  it('uses powershell on Windows and sh elsewhere', () => {
+    expect(buildInstallCommand('script', 'win32').args.join(' ')).toContain('install.ps1');
+    const posix = buildInstallCommand('script', 'darwin');
+    expect(posix.command).toBe('sh');
+    expect(posix.args.join(' ')).toContain('install.sh');
+  });
+});
+
+describe('createCodegraphHook', () => {
+  const fakeCli = (available: boolean) =>
+    recordingRunner(() => (available ? { code: 0, stdout: '0.9.9\n' } : { code: 1 }));
+
+  it('is unavailable when the CLI is missing', async () => {
+    const hook = await createCodegraphHook({
+      runner: fakeCli(false).runner,
+      resolve: async () => '/x/codegraph',
+    });
+    expect(hook.available).toBe(false);
+  });
+
+  it('runs init and sync against the project directory', async () => {
+    const cli = fakeCli(true);
+    const hook = await createCodegraphHook({ runner: cli.runner, resolve: async () => '/x/codegraph' });
+    expect(hook.available).toBe(true);
+    expect(await hook.init('/p')).toEqual({ ok: true });
+    expect(await hook.sync('/p')).toEqual({ ok: true });
+    expect(cli.calls).toEqual([['--version'], ['init', '/p'], ['sync', '/p']]);
+  });
+
+  it('installs via npm and wires the MCP when it is missing', async () => {
+    const cli = fakeCli(true);
+    const commandCalls: Array<{ command: string; args: string[] }> = [];
+    const hook = await createCodegraphHook({
+      runner: cli.runner,
+      resolve: async () => '/x/codegraph',
+      mcp: async () => ({ state: 'missing' }),
+      commandRunner: async (command, args) => {
+        commandCalls.push({ command, args: [...args] });
+        return { code: 0, stdout: '', stderr: '' };
+      },
+    });
+    expect((await hook.installCli('npm')).ok).toBe(true);
+    expect(commandCalls).toEqual([{ command: 'npm', args: ['i', '-g', '@colbymchenry/codegraph'] }]);
+    expect(cli.calls).toEqual([['--version'], ['--version'], ['install', '--yes']]);
+  });
+
+  it('skips wiring when the MCP is already present', async () => {
+    const cli = fakeCli(true);
+    const hook = await createCodegraphHook({
+      runner: cli.runner,
+      resolve: async () => '/x/codegraph',
+      mcp: async () => ({ state: 'installed', configPath: '/c.jsonc' }),
+      commandRunner: async () => ({ code: 0, stdout: '', stderr: '' }),
+    });
+    await hook.installCli('script');
+    expect(cli.calls).toEqual([['--version'], ['--version']]);
   });
 });

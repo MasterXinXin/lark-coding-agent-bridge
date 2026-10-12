@@ -325,3 +325,134 @@ export async function projectStats(runner: CodegraphRunner, dir: string): Promis
     return EMPTY_CODEGRAPH_STATS;
   }
 }
+
+export interface CodegraphOpResult {
+  ok: boolean;
+  detail?: string;
+}
+
+const OP_TIMEOUT_MS = 10 * 60_000;
+
+function failureDetail(result: CodegraphResult, fallback: string): string {
+  return (result.stderr || result.stdout).trim().slice(-500) || fallback;
+}
+
+export async function initProject(
+  runner: CodegraphRunner,
+  dir: string,
+  onOutput?: (chunk: string) => void,
+): Promise<CodegraphOpResult> {
+  const result = await runner(['init', dir], {
+    timeoutMs: OP_TIMEOUT_MS,
+    ...(onOutput ? { onOutput } : {}),
+  });
+  return result.code === 0
+    ? { ok: true }
+    : { ok: false, detail: failureDetail(result, 'codegraph init 失败') };
+}
+
+export async function syncProject(
+  runner: CodegraphRunner,
+  dir: string,
+  onOutput?: (chunk: string) => void,
+): Promise<CodegraphOpResult> {
+  const result = await runner(['sync', dir], {
+    timeoutMs: OP_TIMEOUT_MS,
+    ...(onOutput ? { onOutput } : {}),
+  });
+  return result.code === 0
+    ? { ok: true }
+    : { ok: false, detail: failureDetail(result, 'codegraph sync 失败') };
+}
+
+export type CodegraphInstallMethod = 'script' | 'npm';
+
+/** The official install command for a platform, as `command` + `args`. */
+export function buildInstallCommand(
+  method: CodegraphInstallMethod,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  if (method === 'npm') return { command: 'npm', args: ['i', '-g', '@colbymchenry/codegraph'] };
+  const sh = 'https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh';
+  const ps1 = 'https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1';
+  if (platform === 'win32') {
+    return {
+      command: 'powershell',
+      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `irm ${ps1} | iex`],
+    };
+  }
+  return { command: 'sh', args: ['-c', `curl -fsSL ${sh} | sh`] };
+}
+
+/**
+ * The job-side surface `workspace-api` and `git-jobs` depend on. A plain object
+ * so tests can inject a fake without spawning anything.
+ */
+export interface CodegraphHook {
+  available: boolean;
+  version?: string;
+  init(dir: string): Promise<CodegraphOpResult>;
+  sync(dir: string): Promise<CodegraphOpResult>;
+  installCli(method: CodegraphInstallMethod): Promise<CodegraphOpResult>;
+  wireMcp(): Promise<CodegraphOpResult>;
+}
+
+export interface CreateCodegraphHookOptions {
+  bin?: string;
+  runner?: CodegraphRunner;
+  commandRunner?: CommandRunner;
+  resolve?: ExecutableResolver;
+  onOutput?: (chunk: string) => void;
+  /** Override the MCP probe (tests). */
+  mcp?: () => Promise<CodegraphMcpStatus>;
+}
+
+/**
+ * Resolve everything needed to run codegraph, detecting the CLI once. The
+ * returned hook's `installCli` chains MCP wiring, so a single console click
+ * goes CLI → MCP in one job.
+ */
+export async function createCodegraphHook(
+  opts: CreateCodegraphHookOptions = {},
+): Promise<CodegraphHook> {
+  const bin = opts.bin ?? defaultCodegraphBin();
+  const runner = opts.runner ?? createCodegraphRunner(bin);
+  const commandRunner = opts.commandRunner ?? createCommandRunner();
+  const onOutput = opts.onOutput;
+  const stream: CommandRunOptions = onOutput ? { onOutput } : {};
+  const mcp = opts.mcp ?? (() => mcpStatus());
+  const resolveOpt = opts.resolve ? { resolve: opts.resolve } : {};
+  const cli = await detectCli({ runner, bin, ...resolveOpt });
+
+  const wireMcp = async (): Promise<CodegraphOpResult> => {
+    const result = await runner(['install', '--yes'], { timeoutMs: 5 * 60_000, ...stream });
+    return result.code === 0
+      ? { ok: true }
+      : { ok: false, detail: failureDetail(result, 'codegraph install 失败') };
+  };
+
+  return {
+    available: cli.installed,
+    ...(cli.version ? { version: cli.version } : {}),
+    init: (dir) => initProject(runner, dir, onOutput),
+    sync: (dir) => syncProject(runner, dir, onOutput),
+    wireMcp,
+    installCli: async (method) => {
+      const { command, args } = buildInstallCommand(method);
+      const result = await commandRunner(command, args, { timeoutMs: OP_TIMEOUT_MS, ...stream });
+      if (result.code !== 0) return { ok: false, detail: failureDetail(result, '安装失败') };
+      const after = await detectCli({ runner, bin, ...resolveOpt });
+      if (!after.installed) {
+        return { ok: false, detail: '安装命令已执行，但未检测到 codegraph，请检查 PATH 后重试' };
+      }
+      const status = await mcp().catch(() => ({ state: 'unknown' }) as CodegraphMcpStatus);
+      if (status.state !== 'installed') {
+        const wired = await wireMcp();
+        if (!wired.ok) {
+          return { ok: true, detail: `CLI 已安装；MCP 接入失败：${wired.detail ?? '未知错误'}` };
+        }
+      }
+      return { ok: true, detail: `已安装 codegraph ${after.version ?? ''}`.trim() };
+    },
+  };
+}
