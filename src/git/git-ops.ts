@@ -1,5 +1,6 @@
 import { readdir, stat } from 'node:fs/promises';
 import { mergeProcessEnv, spawnProcess } from '../platform/spawn';
+import { currentOperation } from '../workspace/operation-context';
 
 export interface GitResult {
   code: number;
@@ -19,13 +20,19 @@ export type GitRunner = (args: string[], opts?: GitRunOptions) => Promise<GitRes
 
 /** Spawn the real `git` binary. Extra env is merged case-insensitively. */
 export function createGitRunner(bin = 'git'): GitRunner {
-  return (args, opts = {}) =>
-    new Promise<GitResult>((resolve) => {
+  return (args, opts = {}) => {
+    const op = currentOperation();
+    // A cancelled operation must not spawn more git work.
+    if (op?.signal.aborted) {
+      return Promise.resolve<GitResult>({ code: -1, stdout: '', stderr: '操作已取消' });
+    }
+    return new Promise<GitResult>((resolve) => {
       const child = spawnProcess(bin, args, {
         cwd: opts.cwd,
         env: mergeProcessEnv(process.env, opts.env ?? {}),
         windowsHide: true,
       });
+      op?.track('git', child);
       let stdout = '';
       let stderr = '';
       // A throwing consumer must never unwind the stream `data` handler: that
@@ -63,6 +70,7 @@ export function createGitRunner(bin = 'git'): GitRunner {
         resolve({ code: code ?? -1, stdout, stderr });
       });
     });
+  };
 }
 
 export async function isGitRepo(run: GitRunner, dir: string): Promise<boolean> {

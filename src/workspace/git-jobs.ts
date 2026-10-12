@@ -11,6 +11,8 @@ import {
   type ExecutableResolver,
 } from './codegraph';
 import { JobRegistry } from './jobs';
+import { OperationCancelledError } from './operation-context';
+import { defaultOperations, type OperationRegistry } from './operations';
 import { createProgressWriter } from './output';
 
 /** Process-wide registry backing the console's `GET /api/jobs/:id` route. */
@@ -39,6 +41,8 @@ export interface StartJobDeps {
   codegraphBin?: string;
   /** Test seam: override executable resolution inside the hook. */
   codegraphResolve?: ExecutableResolver;
+  /** Registry backing cancel/shutdown/reconcile; defaults to the process singleton. */
+  operations?: OperationRegistry;
 }
 
 type OnStep = (info: { id: string; name: string }) => void;
@@ -68,10 +72,12 @@ function pullLabel(body: unknown): string {
 function beginJob(
   kind: 'add' | 'pull' | 'codegraph',
   label: string,
+  meta: { profile: string; rootDir?: string },
   deps: StartJobDeps,
   work: (runner: GitRunner, onStep: OnStep, codegraph: CodegraphHook | undefined) => Promise<unknown>,
 ): { id: string } {
   const registry = deps.registry ?? jobRegistry;
+  const operations = deps.operations ?? defaultOperations;
   const base = deps.runner ?? createGitRunner();
   const { id: jobId } = registry.create({ kind, label, redact: deps.redact ?? [] });
 
@@ -99,25 +105,43 @@ function beginJob(
   void (async () => {
     try {
       registry.append(jobId, { stream: 'info', text: `任务已启动：${label}` });
-      const codegraph =
-        deps.codegraph ??
-        (await createCodegraphHook({
-          ...(deps.codegraphRunner ? { runner: deps.codegraphRunner } : {}),
-          ...(deps.commandRunner ? { commandRunner: deps.commandRunner } : {}),
-          ...(deps.codegraphBin ? { bin: deps.codegraphBin } : {}),
-          ...(deps.codegraphResolve ? { resolve: deps.codegraphResolve } : {}),
-          onOutput: (chunk) => writer.push(chunk),
-        }).catch((err) => {
-          log.fail('workspace', err, { step: 'codegraph-hook', jobId });
-          return undefined;
-        }));
-      const result = await work(runner, onStep, codegraph);
-      writer.flush();
-      registry.finish(jobId, result);
+      await operations.run(
+        {
+          id: jobId,
+          opKind: kind,
+          label,
+          profile: meta.profile,
+          ...(meta.rootDir ? { rootDir: meta.rootDir } : {}),
+          ...(registry.get(jobId)?.startedAt !== undefined
+            ? { startedAt: registry.get(jobId)!.startedAt }
+            : {}),
+        },
+        async () => {
+          const codegraph =
+            deps.codegraph ??
+            (await createCodegraphHook({
+              ...(deps.codegraphRunner ? { runner: deps.codegraphRunner } : {}),
+              ...(deps.commandRunner ? { commandRunner: deps.commandRunner } : {}),
+              ...(deps.codegraphBin ? { bin: deps.codegraphBin } : {}),
+              ...(deps.codegraphResolve ? { resolve: deps.codegraphResolve } : {}),
+              onOutput: (chunk) => writer.push(chunk),
+            }).catch((err) => {
+              log.fail('workspace', err, { step: 'codegraph-hook', jobId });
+              return undefined;
+            }));
+          const result = await work(runner, onStep, codegraph);
+          writer.flush();
+          registry.finish(jobId, result);
+        },
+      );
     } catch (err) {
       writer.flush();
-      registry.fail(jobId, err instanceof Error ? err.message : String(err));
-      log.fail('workspace', err, { step: 'workspace-job', jobId });
+      if (err instanceof OperationCancelledError) {
+        registry.cancel(jobId, '已取消，正在回滚');
+      } else {
+        registry.fail(jobId, err instanceof Error ? err.message : String(err));
+        log.fail('workspace', err, { step: 'workspace-job', jobId });
+      }
     }
   })().catch(() => undefined);
 
@@ -131,7 +155,7 @@ export function startAddJob(
   body: unknown,
   deps: StartJobDeps = {},
 ): { id: string } {
-  return beginJob('add', addLabel(body), deps, (runner, onStep, codegraph) =>
+  return beginJob('add', addLabel(body), { profile, rootDir }, deps, (runner, onStep, codegraph) =>
     addProjects(profile, rootDir, body, runner, onStep, codegraph),
   );
 }
@@ -143,7 +167,7 @@ export function startPullJob(
   body: unknown,
   deps: StartJobDeps = {},
 ): { id: string } {
-  return beginJob('pull', pullLabel(body), deps, (runner, onStep, codegraph) =>
+  return beginJob('pull', pullLabel(body), { profile, rootDir }, deps, (runner, onStep, codegraph) =>
     pullProjects(profile, rootDir, body, runner, onStep, 'manual', codegraph),
   );
 }
@@ -226,7 +250,11 @@ export function startCodegraphJob(
   deps: StartJobDeps = {},
 ): { id: string } {
   const raw = (body && typeof body === 'object' ? body : {}) as CodegraphJobBody;
-  return beginJob('codegraph', codegraphLabel(raw), deps, (_runner, onStep, codegraph) =>
-    runCodegraphAction(profile, rootDir, raw, codegraph, onStep),
+  return beginJob(
+    'codegraph',
+    codegraphLabel(raw),
+    { profile, rootDir },
+    deps,
+    (_runner, onStep, codegraph) => runCodegraphAction(profile, rootDir, raw, codegraph, onStep),
   );
 }

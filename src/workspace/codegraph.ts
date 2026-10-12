@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { resolveExecutablePath } from '../cli/agent-detection';
 import { spawnProcess } from '../platform/spawn';
+import { currentOperation } from './operation-context';
 import { stripAnsi } from './output';
 
 export interface CodegraphResult {
@@ -37,14 +38,20 @@ export function defaultCodegraphBin(): string {
  * otherwise hang a job forever).
  */
 export function createCommandRunner(): CommandRunner {
-  return (command, args, opts = {}) =>
-    new Promise<CodegraphResult>((resolve) => {
+  return (command, args, opts = {}) => {
+    const op = currentOperation();
+    // A cancelled operation must not spawn more work.
+    if (op?.signal.aborted) {
+      return Promise.resolve<CodegraphResult>({ code: -1, stdout: '', stderr: '操作已取消' });
+    }
+    return new Promise<CodegraphResult>((resolve) => {
       let stdout = '';
       let stderr = '';
       const child = spawnProcess(command, args, {
         ...(opts.cwd ? { cwd: opts.cwd } : {}),
         windowsHide: true,
       });
+      op?.track('codegraph', child);
       const emit = (chunk: string) => {
         try {
           opts.onOutput?.(chunk);
@@ -70,6 +77,7 @@ export function createCommandRunner(): CommandRunner {
       child.on('error', (err) => finish({ code: -1, stdout, stderr: stderr || String(err) }));
       child.on('close', (code) => finish({ code: code ?? -1, stdout, stderr }));
     });
+  };
 }
 
 export function createCodegraphRunner(bin: string = defaultCodegraphBin()): CodegraphRunner {
