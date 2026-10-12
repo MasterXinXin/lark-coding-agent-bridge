@@ -3,6 +3,8 @@ import type { KnownChat } from '../bot/lark-info';
 import type { MutableProfileState } from '../config/config-ops';
 import type { Controls } from '../commands';
 import type { FetchLike } from '../git/providers';
+import type { GitRunner } from '../git/git-ops';
+import type { JobRegistry } from '../workspace/jobs';
 import type { ManagedStatus } from '../runtime/supervisor';
 
 /**
@@ -42,6 +44,10 @@ export interface UiServerDeps {
   port?: number;
   /** Injectable fetch for git-provider calls (tests pass a mock; defaults to global fetch). */
   fetchImpl?: FetchLike;
+  /** Injectable git runner for project add/pull jobs (tests pass a recorder). */
+  gitRunner?: GitRunner;
+  /** Job registry backing `GET /api/jobs/:id`; defaults to the process-wide registry. */
+  jobRegistry?: JobRegistry;
 }
 
 export interface UiServerHandle {

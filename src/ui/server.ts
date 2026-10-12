@@ -42,9 +42,7 @@ import {
   sendJson,
 } from './http';
 import {
-  addProjects,
   projectsView,
-  pullProjects,
   removeProject,
   setSchedule,
   getSchedule,
@@ -52,6 +50,7 @@ import {
   updateProjectBranch,
 } from './workspace-api';
 import { browseDirectory } from '../workspace/dir-browse';
+import { jobRegistry, startAddJob, startPullJob } from '../workspace/git-jobs';
 import type { Controls } from '../commands';
 import type { UiServerDeps, UiServerHandle } from './types';
 
@@ -310,7 +309,11 @@ async function route(
   if (path === '/api/projects' && p) {
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'no profile');
-    sendJson(res, 200, await addProjects(profile, deps.rootDir, await readJsonBody(req)));
+    const { id: jobId } = startAddJob(profile, deps.rootDir, await readJsonBody(req), {
+      ...(deps.gitRunner ? { runner: deps.gitRunner } : {}),
+      registry: deps.jobRegistry ?? jobRegistry,
+    });
+    sendJson(res, 202, { jobId });
     return;
   }
   if (path === '/api/projects/remove' && p) {
@@ -328,7 +331,11 @@ async function route(
   if (path === '/api/projects/pull' && p) {
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'no profile');
-    sendJson(res, 200, await pullProjects(profile, deps.rootDir, await readJsonBody(req)));
+    const { id: jobId } = startPullJob(profile, deps.rootDir, await readJsonBody(req), {
+      ...(deps.gitRunner ? { runner: deps.gitRunner } : {}),
+      registry: deps.jobRegistry ?? jobRegistry,
+    });
+    sendJson(res, 202, { jobId });
     return;
   }
   if (path === '/api/schedule' && g) {
@@ -425,6 +432,16 @@ async function route(
     const profile = body.profile ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'profile is required');
     sendJson(res, 200, await meetingLeave(sup.controlsFor(profile)?.meeting, body));
+    return;
+  }
+
+  // --- background job progress (project add/pull) ---
+  if (path.startsWith('/api/jobs/') && g) {
+    const id = decodeURIComponent(path.slice('/api/jobs/'.length));
+    const since = Number(url.searchParams.get('since') ?? '0') || 0;
+    const snap = (deps.jobRegistry ?? jobRegistry).get(id, since);
+    if (!snap) throw new HttpError(404, '任务不存在或已过期');
+    sendJson(res, 200, snap);
     return;
   }
 

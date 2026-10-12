@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { createRootConfig, saveRootConfig, writeActiveProfile } from '../../../src/config/profile-store';
 import { startUiServer } from '../../../src/ui/server';
+import { JobRegistry, type JobSnapshot } from '../../../src/workspace/jobs';
 import type { UiServerHandle, UiSupervisor } from '../../../src/ui/types';
 
 const app = { id: 'cli_test', secret: 's', tenant: 'feishu' as const };
 let handle: UiServerHandle;
+let jobs: JobRegistry;
 let rootDir: string;
 let workspace: string;
 let base: string;
@@ -33,7 +35,8 @@ beforeEach(async () => {
   root.profiles.claude!.workspaces = { default: workspace };
   await saveRootConfig(root, join(rootDir, 'config.json'));
   await writeActiveProfile(rootDir, 'claude');
-  handle = await startUiServer({ supervisor, version: 'test', rootDir });
+  jobs = new JobRegistry();
+  handle = await startUiServer({ supervisor, version: 'test', rootDir, jobRegistry: jobs });
   base = `http://127.0.0.1:${handle.port}`;
 });
 afterEach(async () => {
@@ -73,6 +76,18 @@ async function json(res: Response): Promise<any> {
   return res.json();
 }
 
+/** Poll the injected registry until the job leaves `running`, or fail the test. */
+async function waitForJob(id: string, timeoutMs = 20_000): Promise<JobSnapshot> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const snap = jobs.get(id);
+    if (!snap) throw new Error(`job ${id} disappeared`);
+    if (snap.status !== 'running') return snap;
+    if (Date.now() >= deadline) throw new Error(`job ${id} still running after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 describe('workspace routes', { timeout: 30_000 }, () => {
   it('browses a directory', async () => {
     const res = await get(`/api/workspace/dir?path=${encodeURIComponent(workspace)}`);
@@ -83,9 +98,32 @@ describe('workspace routes', { timeout: 30_000 }, () => {
 
   it('adds, lists and removes a project', async () => {
     const origin = await makeOrigin(rootDir);
-    const added = await json(await post('/api/projects', { projects: [{ repoUrl: origin, name: 'x' }] }));
-    expect(added.projects).toHaveLength(1);
-    const id = added.projects[0].id;
+    const created = await post('/api/projects', { projects: [{ repoUrl: origin, name: 'x' }] });
+    expect(created.status).toBe(202);
+    const { jobId } = await json(created);
+    expect(typeof jobId).toBe('string');
+
+    const snap = await waitForJob(jobId);
+    expect(snap.status).toBe('succeeded');
+    expect(snap.logs.some((l) => l.text.includes('任务已启动'))).toBe(true);
+
+    // Unknown / expired job ids surface as 404.
+    const missing = await get('/api/jobs/does-not-exist');
+    expect(missing.status).toBe(404);
+
+    // `since` returns only lines newer than the given seq.
+    const full = await json(await get(`/api/jobs/${jobId}`));
+    const lastSeq = full.logs.at(-1).seq as number;
+    expect(lastSeq).toBeGreaterThan(0);
+    const inc = await json(await get(`/api/jobs/${jobId}?since=${lastSeq}`));
+    expect(inc.logs).toHaveLength(0);
+    const earlier = await json(await get(`/api/jobs/${jobId}?since=0`));
+    expect(earlier.logs.every((l: { seq: number }) => l.seq > 0)).toBe(true);
+    expect(earlier.logs.length).toBeGreaterThanOrEqual(full.logs.length);
+
+    const listed = await json(await get('/api/projects'));
+    expect(listed.projects).toHaveLength(1);
+    const id = listed.projects[0].id;
 
     const removed = await json(await post('/api/projects/remove', { id }));
     expect(removed.projects).toHaveLength(0);
