@@ -23,6 +23,7 @@ import {
   type PullTrigger,
 } from '../workspace/history';
 import { browseDirectory } from '../workspace/dir-browse';
+import { projectIndexInfo, type CodegraphIndexInfo } from '../workspace/codegraph';
 import { ProjectStore, type ProjectEntry, type PullSchedule } from '../workspace/projects';
 import { HttpError } from './http';
 import { loadProfileState } from './api';
@@ -59,6 +60,7 @@ export interface ProjectView {
   exists: boolean;
   status: RepoStatus;
   lastPullAt?: string;
+  codegraph: CodegraphIndexInfo;
 }
 
 export interface ProjectsView {
@@ -136,8 +138,10 @@ export async function projectsView(profile: string, rootDir?: string): Promise<P
     let absolutePath = '';
     let exists = false;
     let status: RepoStatus = ZERO_STATUS;
+    let codegraph: CodegraphIndexInfo = { indexed: false };
     try {
       absolutePath = resolveProjectDir(workspaceDir, project.localPath);
+      codegraph = await projectIndexInfo(absolutePath);
       exists = await isGitRepo(run, absolutePath).catch(() => false);
       if (exists) status = await repoStatus(run, absolutePath).catch(() => ZERO_STATUS);
     } catch {
@@ -149,6 +153,7 @@ export async function projectsView(profile: string, rootDir?: string): Promise<P
       absolutePath,
       exists,
       status,
+      codegraph,
       ...(lastByProject.get(project.id) ? { lastPullAt: lastByProject.get(project.id)! } : {}),
     });
   }
@@ -435,4 +440,43 @@ function readId(body: unknown): string {
 
 function deriveName(repoUrl: string): string {
   return repoUrl.trim().replace(/\.git$/i, '').replace(/[/\\]+$/, '').split(/[/\\:]/).pop() ?? '';
+}
+
+export interface ProjectTarget {
+  id: string;
+  name: string;
+  dir: string;
+}
+
+/** Every project that resolves inside the workspace, paired with its checkout dir. */
+export async function listProjectTargets(
+  profile: string,
+  rootDir?: string,
+): Promise<ProjectTarget[]> {
+  const { workspaceDir, store } = await statePaths(profile, rootDir);
+  const out: ProjectTarget[] = [];
+  for (const project of store.list()) {
+    try {
+      out.push({
+        id: project.id,
+        name: project.name,
+        dir: resolveProjectDir(workspaceDir, project.localPath),
+      });
+    } catch {
+      // A stored path outside the workspace cannot be indexed here; skip it.
+    }
+  }
+  return out;
+}
+
+/** Resolve one project's checkout dir by id, or 404. */
+export async function projectDirById(
+  profile: string,
+  rootDir: string | undefined,
+  id: string,
+): Promise<string> {
+  const { workspaceDir, store } = await statePaths(profile, rootDir);
+  const entry = store.get(id);
+  if (!entry) throw new HttpError(404, `项目不存在：${id}`);
+  return resolveProjectDir(workspaceDir, entry.localPath);
 }
