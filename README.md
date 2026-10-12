@@ -287,6 +287,14 @@ This is a profile-field snippet. Do not replace the whole `config.json` with it;
 
 The bridge checks that a selected directory exists, is a directory, and is not an overly broad location such as `/`, the home root, a system directory, or a temp root. The working directory is only the current directory for an agent run. It is not a filesystem sandbox; actual file access still depends on the local agent process and its permission mode.
 
+### Console: workspaces and projects
+
+The management console (the `http://127.0.0.1:<port>/?token=…` URL the bridge prints on start) has a **Workspace** tab for changing the workspace directory, managing global Git accounts, and adding/pulling projects.
+
+- **Add from an account**: once a Git account is configured you can list its remote repositories and add several at once with a per-repo branch; you can also paste a repository URL manually.
+- **Live progress**: add (clone) and pull run in the background while a progress dialog streams git's output (progress, `remote:` messages) and phases. Closing the dialog leaves the task running; reloading the page reconnects you to that task's progress view.
+- Only one add/pull task runs at a time. Task state lives in memory only, so an in-progress task is lost if the bridge restarts.
+
 ## Permission modes
 
 The recommended user-facing profile config is `permissions.defaultAccess` and `permissions.maxAccess`. New profiles default to `full` for both values so the bridge can keep local tools, authorization flows, file writes, and other agent features fully usable. To tighten a profile, set one or both values to `workspace` or `read-only`; stricter modes can limit local tool execution, login/authorization flows, file writes, and similar capabilities.

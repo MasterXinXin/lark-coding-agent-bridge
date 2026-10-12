@@ -287,6 +287,14 @@ lark-channel-bridge profile export <name> --include-secrets --yes
 
 bridge 会检查所选目录存在、是目录，并且不是 `/`、Home 根、系统目录或临时目录根这类范围过大的位置。工作目录只是 agent run 的当前目录，不是文件系统 sandbox；agent 实际能访问哪些文件仍取决于本机 agent 进程及其权限模式。
 
+### 控制台：工作空间与项目
+
+管理控制台（bridge 启动时打印的 `http://127.0.0.1:<port>/?token=…`）的「工作空间」页用于查看/修改工作空间目录、管理全局 Git 账号，以及添加和拉取项目。
+
+- **从账号添加**：配置好 Git 账号后可列出远端仓库、逐仓库选分支批量添加；也可手动填写仓库地址。
+- **实时进度**：添加（clone）或拉取（pull）在后台执行，界面弹出进度窗口实时滚动显示 git 输出（进度、`remote:` 消息）与阶段。关闭窗口任务仍在后台继续，刷新页面会自动回到该任务的进度视图。
+- 同一时刻只允许一个添加/拉取任务；任务状态只保存在内存中，bridge 重启后进行中的任务会丢失。
+
 ## 权限模式
 
 推荐给用户配置的是 `permissions.defaultAccess` 和 `permissions.maxAccess`。新 profile 默认两项都是 `full`，以保持 bridge 的本地工具、授权流程、文件写入等能力完整可用。如需收紧权限，可以改成 `workspace` 或 `read-only`；收紧后本地工具执行、登录 / 授权流程、文件写入等能力可能受限。
