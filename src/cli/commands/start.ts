@@ -60,6 +60,7 @@ import { SessionStore } from '../../session/store';
 import { SessionCatalog } from '../../session/catalog';
 import { WorkspaceStore } from '../../workspace/store';
 import { PullScheduler } from '../../workspace/scheduler';
+import { cancelAllOperations, reconcileStaleOperations } from '../../workspace/operations';
 
 // Prefer IPv4 — Node 20+ defaults to "verbatim" which respects whatever
 // the resolver returns first; in IPv6-broken networks (WSL2, certain VPNs,
@@ -144,6 +145,10 @@ async function runClassic(opts: StartOptions): Promise<void> {
     hostname: os.hostname(),
   });
   await gcOldLogs();
+  // Kill + roll back any workspace job a force-killed previous bridge left behind.
+  await reconcileStaleOperations(appPaths.rootDir).catch((err) =>
+    log.warn('workspace', 'reconcile-failed', { err: String(err) }),
+  );
 
   const supervisor = new Supervisor({ configPath, rootDir: appPaths.rootDir });
 
@@ -203,6 +208,10 @@ async function runSupervisorConsole(opts: StartOptions): Promise<void> {
     hostname: os.hostname(),
   });
   await gcOldLogs();
+  // Reconcile leftovers before the scheduler can start new pulls.
+  await reconcileStaleOperations(appPaths.rootDir).catch((err) =>
+    log.warn('workspace', 'reconcile-failed', { err: String(err) }),
+  );
 
   const supervisor = new Supervisor({ configPath, rootDir: appPaths.rootDir });
 
@@ -268,6 +277,11 @@ function parkWithShutdown(
     shuttingDown = true;
     console.log(`\n收到 ${sig}，正在关闭...`);
     scheduler?.stop();
+    // Kill in-flight workspace jobs (git/codegraph), roll back half-finished
+    // work, and release the ledger before we exit.
+    await cancelAllOperations('shutdown').catch((err) =>
+      log.warn('workspace', 'cancel-all-failed', { err: String(err) }),
+    );
     if (uiServer) {
       await uiServer.close().catch(() => {});
       await removeUiSidecar(appPaths.hostUiFile);
