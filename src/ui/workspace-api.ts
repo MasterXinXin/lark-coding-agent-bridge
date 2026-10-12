@@ -1,4 +1,4 @@
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rm } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveAppPaths } from '../config/app-paths';
 import { saveWorkspaceConfig, type MutableProfileState } from '../config/config-ops';
@@ -229,9 +229,9 @@ export async function removeProject(
 
 /**
  * Recursively delete a project's checkout. Refuses paths that resolve outside
- * the workspace or that equal the workspace root itself; a missing directory is
- * treated as already deleted. A real failure throws so the caller keeps the
- * record.
+ * the workspace — lexically or through a symlinked/junction component — or that
+ * land on the workspace root itself; a missing directory is treated as already
+ * deleted. A real failure throws so the caller keeps the record.
  */
 async function deleteProjectDir(workspaceDir: string, entry: ProjectEntry): Promise<RemovedResult> {
   let dir: string;
@@ -240,17 +240,40 @@ async function deleteProjectDir(workspaceDir: string, entry: ProjectEntry): Prom
   } catch {
     return { id: entry.id, deleted: false, warning: '项目目录位于工作空间之外，已保留未删除' };
   }
-  if (dir === resolve(workspaceDir)) {
-    return { id: entry.id, dir, deleted: false, warning: '项目目录与工作空间根目录相同，已保留未删除' };
+  // Canonicalize both sides before comparing: `resolveProjectDir` is purely
+  // lexical, so a junction/symlink component could otherwise smuggle the target
+  // outside. `realpath` also folds case on Windows, which the old case-sensitive
+  // `===` root guard missed.
+  const rootReal = await realpath(workspaceDir).catch(() => resolve(workspaceDir));
+  try {
+    // `lstat` inspects the final link without following it, so a dangling link
+    // is seen as present here and rejected by the `realpath` below instead of
+    // being treated as an already-deleted directory.
+    await lstat(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { id: entry.id, dir, deleted: true };
+    const message = err instanceof Error ? err.message : String(err);
+    throw new HttpError(400, `无法访问项目目录：${message}`);
   }
-  const info = await stat(dir).catch(() => undefined);
-  if (!info) return { id: entry.id, dir, deleted: true };
+  let targetReal: string;
+  try {
+    targetReal = await realpath(dir);
+  } catch {
+    return { id: entry.id, dir, deleted: false, warning: '项目目录不可访问或链接已失效，已保留未删除' };
+  }
+  const rel = relative(rootReal, targetReal);
+  if (rel === '' || rel.startsWith('..' + sep) || isAbsolute(rel)) {
+    return { id: entry.id, dir, deleted: false, warning: '项目目录位于工作空间之外，已保留未删除' };
+  }
   try {
     await rm(dir, { recursive: true, force: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new HttpError(400, `删除目录失败：${message}`);
   }
+  // The record is removed only after the delete succeeds, so a later
+  // `store.flush()` failure leaves the directory gone and the record present;
+  // retrying then self-heals (the missing dir is treated as already deleted).
   return { id: entry.id, dir, deleted: true };
 }
 

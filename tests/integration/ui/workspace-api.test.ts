@@ -1,5 +1,6 @@
-import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -66,6 +67,24 @@ async function pathExists(p: string): Promise<boolean> {
     () => false,
   );
 }
+
+/**
+ * Whether this process can create directory links without elevated rights.
+ * Windows directory junctions need no admin; POSIX symlinks may be restricted.
+ */
+const canLinkDir = ((): boolean => {
+  let base: string | undefined;
+  try {
+    base = mkdtempSync(join(tmpdir(), 'bridge-link-'));
+    mkdirSync(join(base, 'target'));
+    symlinkSync(join(base, 'target'), join(base, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (base) rmSync(base, { recursive: true, force: true });
+  }
+})();
 
 describe('workspace-api', { timeout: 30_000 }, () => {
   it('adds a project and clones it into the workspace', async () => {
@@ -240,6 +259,103 @@ describe('workspace-api', { timeout: 30_000 }, () => {
     expect(view.projects).toHaveLength(0);
     expect(view.removed.deleted).toBe(false);
     expect(view.removed.warning).toBeTruthy();
+  });
+
+  it('refuses to delete when an absolute localPath points at the workspace root', async () => {
+    const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
+    await writeFile(
+      appPaths.projectsFile,
+      JSON.stringify({
+        version: 1,
+        projects: [
+          { id: 'abs-root', name: 'abs-root', repoUrl: 'https://e/x.git', localPath: workspace, branch: 'main' },
+        ],
+      }),
+      'utf8',
+    );
+
+    const view = await removeProject('claude', rootDir, { id: 'abs-root', deleteDir: true });
+
+    expect(await pathExists(workspace)).toBe(true);
+    expect(view.projects).toHaveLength(0);
+    expect(view.removed.deleted).toBe(false);
+    expect(view.removed.warning).toBeTruthy();
+  });
+
+  it('refuses to delete a "foo/.." localPath that normalizes onto the root', async () => {
+    const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
+    await writeFile(
+      appPaths.projectsFile,
+      JSON.stringify({
+        version: 1,
+        projects: [
+          { id: 'dotdot', name: 'dotdot', repoUrl: 'https://e/x.git', localPath: 'foo/..', branch: 'main' },
+        ],
+      }),
+      'utf8',
+    );
+
+    const view = await removeProject('claude', rootDir, { id: 'dotdot', deleteDir: true });
+
+    expect(await pathExists(workspace)).toBe(true);
+    expect(view.projects).toHaveLength(0);
+    expect(view.removed.deleted).toBe(false);
+    expect(view.removed.warning).toBeTruthy();
+  });
+
+  it.skipIf(!canLinkDir)('does not follow a junction/symlink out of the workspace when deleting', async () => {
+    const appPaths = resolveAppPaths({ rootDir, profile: 'claude' });
+    const outside = join(rootDir, 'outside-target');
+    await mkdir(join(outside, 'inner'), { recursive: true });
+    const marker = join(outside, 'inner', 'marker.txt');
+    await writeFile(marker, 'keep', 'utf8');
+    await symlink(outside, join(workspace, 'sub'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    await writeFile(
+      appPaths.projectsFile,
+      JSON.stringify({
+        version: 1,
+        projects: [
+          { id: 'linked', name: 'linked', repoUrl: 'https://e/x.git', localPath: 'sub/inner', branch: 'main' },
+        ],
+      }),
+      'utf8',
+    );
+
+    const view = await removeProject('claude', rootDir, { id: 'linked', deleteDir: true });
+
+    expect(await pathExists(marker)).toBe(true);
+    expect(await pathExists(outside)).toBe(true);
+    expect(view.removed.deleted).toBe(false);
+    expect(view.removed.warning).toBeTruthy();
+  });
+
+  it.skipIf(process.platform !== 'win32')('keeps the record when deleting the checkout fails', async () => {
+    const origin = await makeOrigin(rootDir);
+    const added = await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'locked' }] });
+    const id = added.projects[0]!.id;
+    const dir = join(workspace, 'locked');
+    // A live process whose CWD is the checkout holds a Windows directory lock
+    // (open file handles alone don't), so removal fails and the record must
+    // survive for a retry.
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      cwd: dir,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.once('spawn', () => resolve());
+      child.once('error', reject);
+    });
+    try {
+      await expect(removeProject('claude', rootDir, { id, deleteDir: true })).rejects.toBeInstanceOf(HttpError);
+      const view = await projectsView('claude', rootDir);
+      expect(view.projects.map((p) => p.id)).toContain(id);
+    } finally {
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      child.kill();
+      await exited;
+    }
   });
 });
 

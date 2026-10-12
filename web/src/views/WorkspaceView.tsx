@@ -217,9 +217,9 @@ export function WorkspaceView({ profile }: { profile: string }) {
       <RemoveProjectDialog
         open={removeTarget !== null}
         project={removeTarget}
-        busy={busy}
+        busy={busy || jobRunning}
         onOpenChange={(o) => {
-          if (!o) setRemoveTarget(null);
+          if (!o && !(busy || jobRunning)) setRemoveTarget(null);
         }}
         onConfirm={doRemove}
       />
