@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/dialog";
 
 const POLL_MS = 700;
+/** Cap the client-side log buffer so a long job cannot grow state/DOM unbounded. */
+const MAX_LOG_LINES = 2000;
 
 function statusBadge(status: JobStatus): { variant: "secondary" | "success" | "destructive"; text: string } {
   if (status === "succeeded") return { variant: "success", text: "完成" };
@@ -54,11 +56,14 @@ export function JobProgressDialog({
   open,
   onOpenChange,
   onFinished,
+  onStatus,
 }: {
   jobId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onFinished: () => void;
+  /** Reports each status change so callers can keep a closed job observable. */
+  onStatus?: (status: JobStatus) => void;
 }) {
   const [logs, setLogs] = useState<JobView["logs"]>([]);
   const [snapshot, setSnapshot] = useState<JobView | null>(null);
@@ -68,12 +73,20 @@ export function JobProgressDialog({
   const logRef = useRef<HTMLDivElement>(null);
   /** Latest `onFinished` without making the polling effect depend on its identity. */
   const onFinishedRef = useRef(onFinished);
+  /** Latest `onStatus` without making the polling effect depend on its identity. */
+  const onStatusRef = useRef(onStatus);
   /** Job id we already reported as finished, so `onFinished` fires at most once. */
   const finishedForRef = useRef<string | null>(null);
+  /** Last status handed to `onStatus`, so it only fires on actual changes. */
+  const reportedStatusRef = useRef<JobStatus | null>(null);
 
   useEffect(() => {
     onFinishedRef.current = onFinished;
   }, [onFinished]);
+
+  useEffect(() => {
+    onStatusRef.current = onStatus;
+  }, [onStatus]);
 
   useEffect(() => {
     if (!open || !jobId) return;
@@ -86,6 +99,13 @@ export function JobProgressDialog({
     setSnapshot(null);
     setLost(false);
     setTransientErrors(0);
+    reportedStatusRef.current = null;
+
+    const reportStatus = (next: JobStatus) => {
+      if (reportedStatusRef.current === next) return;
+      reportedStatusRef.current = next;
+      onStatusRef.current?.(next);
+    };
 
     const finish = () => {
       if (finishedForRef.current === jobId) return;
@@ -101,9 +121,13 @@ export function JobProgressDialog({
         setTransientErrors(0);
         if (snap.logs.length > 0) {
           lastSeq = Math.max(lastSeq, ...snap.logs.map((l) => l.seq));
-          setLogs((prev) => [...prev, ...snap.logs]);
+          setLogs((prev) => {
+            const next = [...prev, ...snap.logs];
+            return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
+          });
         }
         setSnapshot(snap);
+        reportStatus(snap.status);
         if (snap.status !== "running") {
           finish();
           return;
@@ -112,6 +136,7 @@ export function JobProgressDialog({
         if (cancelled) return;
         if ((e as Error & { status?: number }).status === 404) {
           setLost(true);
+          reportStatus("failed");
           finish();
           return;
         }
@@ -162,7 +187,8 @@ export function JobProgressDialog({
 
   const displayPct = status === "succeeded" ? 100 : parsedPct;
   const elapsedMs = snapshot ? (snapshot.endedAt ?? nowTick) - snapshot.startedAt : 0;
-  const badge = statusBadge(status);
+  const badge =
+    lost && !snapshot ? { variant: "secondary" as const, text: "状态丢失" } : statusBadge(status);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

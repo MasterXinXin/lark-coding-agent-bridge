@@ -4,6 +4,7 @@ import type {
   AccountsView,
   DirListing,
   GitAccount,
+  JobStatus,
   ProjectView,
   ProjectsView,
   StartJobResponse,
@@ -26,10 +27,9 @@ import { AddProjectDialog } from "@/components/AddProjectDialog";
 import type { AddProjectItem } from "@/components/AddProjectDialog";
 import { JobProgressDialog } from "@/components/JobProgressDialog";
 
-const ACTIVE_JOB_KEY = "lark.bridge.activeJob";
-
 export function WorkspaceView({ profile }: { profile: string }) {
   const q = `profile=${encodeURIComponent(profile)}`;
+  const activeJobKey = `lark.bridge.activeJob.${profile}`;
   const [view, setView] = useState<ProjectsView | null>(null);
   const [accounts, setAccounts] = useState<GitAccount[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +38,8 @@ export function WorkspaceView({ profile }: { profile: string }) {
   const [addOpen, setAddOpen] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobOpen, setJobOpen] = useState(false);
+  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
+  const jobRunning = jobStatus === "running";
 
   const load = useCallback(
     () =>
@@ -59,12 +61,12 @@ export function WorkspaceView({ profile }: { profile: string }) {
 
   // Reconnect to a job that was still running when the page was last closed.
   useEffect(() => {
-    const saved = localStorage.getItem(ACTIVE_JOB_KEY);
+    const saved = localStorage.getItem(activeJobKey);
     if (saved) {
       setJobId(saved);
       setJobOpen(true);
     }
-  }, []);
+  }, [activeJobKey]);
 
   async function setRoot(path: string) {
     setBusy(true);
@@ -84,7 +86,7 @@ export function WorkspaceView({ profile }: { profile: string }) {
     setBusy(true);
     try {
       const { jobId } = await apiPost<StartJobResponse>(`/api/projects/pull?${q}`, id ? { id } : {});
-      localStorage.setItem(ACTIVE_JOB_KEY, jobId);
+      localStorage.setItem(activeJobKey, jobId);
       setJobId(jobId);
       setJobOpen(true);
     } catch (e) {
@@ -120,7 +122,7 @@ export function WorkspaceView({ profile }: { profile: string }) {
     setBusy(true);
     try {
       const { jobId } = await apiPost<StartJobResponse>(`/api/projects?${q}`, { projects: items });
-      localStorage.setItem(ACTIVE_JOB_KEY, jobId);
+      localStorage.setItem(activeJobKey, jobId);
       setJobId(jobId);
       setAddOpen(false);
       setJobOpen(true);
@@ -158,11 +160,16 @@ export function WorkspaceView({ profile }: { profile: string }) {
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>项目（{view.projects.length}）</CardTitle>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => pull()}>
+          <div className="flex items-center gap-2">
+            {jobId && !jobOpen && jobStatus === "running" && (
+              <Button variant="outline" size="sm" onClick={() => setJobOpen(true)}>
+                任务运行中 · 查看进度
+              </Button>
+            )}
+            <Button variant="outline" size="sm" disabled={busy || jobRunning} onClick={() => pull()}>
               全部拉取
             </Button>
-            <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Button size="sm" disabled={busy || jobRunning} onClick={() => setAddOpen(true)}>
               + 添加项目
             </Button>
           </div>
@@ -172,7 +179,14 @@ export function WorkspaceView({ profile }: { profile: string }) {
             <p className="text-sm text-muted-foreground">还没有项目，点「添加项目」填入仓库地址。</p>
           )}
           {view.projects.map((p) => (
-            <ProjectRow key={p.id} project={p} busy={busy} onPull={pull} onRemove={remove} onBranch={setBranch} />
+            <ProjectRow
+              key={p.id}
+              project={p}
+              busy={busy || jobRunning}
+              onPull={pull}
+              onRemove={remove}
+              onBranch={setBranch}
+            />
           ))}
         </CardContent>
       </Card>
@@ -182,15 +196,16 @@ export function WorkspaceView({ profile }: { profile: string }) {
         open={addOpen}
         onOpenChange={setAddOpen}
         accounts={accounts}
-        busy={busy}
+        busy={busy || jobRunning}
         onAdd={addItems}
       />
       <JobProgressDialog
         open={jobOpen}
         jobId={jobId}
         onOpenChange={setJobOpen}
+        onStatus={setJobStatus}
         onFinished={() => {
-          localStorage.removeItem(ACTIVE_JOB_KEY);
+          localStorage.removeItem(activeJobKey);
           void load();
         }}
       />
