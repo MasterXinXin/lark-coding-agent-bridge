@@ -12,6 +12,7 @@ import {
 } from '../../../src/config/profile-store';
 import { startUiServer } from '../../../src/ui/server';
 import type { UiServerHandle, UiSupervisor } from '../../../src/ui/types';
+import { defaultOperations } from '../../../src/workspace/operations';
 
 const app = { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' as const };
 
@@ -176,6 +177,22 @@ describe('ui server (supervisor-backed)', () => {
     expect(added.allowedUsers).toContain('ou_alice');
     const removed = await json(await post('/api/access', handle.token, { action: 'remove', kind: 'user', id: 'ou_alice' }));
     expect(removed.allowedUsers).not.toContain('ou_alice');
+  });
+
+  it('cancels a running workspace job via POST /api/jobs/:id/cancel', async () => {
+    const work = defaultOperations.run(
+      { id: 'route-cancel-1', opKind: 'add', label: '添加项目' },
+      () => new Promise<void>(() => {}),
+    );
+    work.catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const res = await post('/api/jobs/route-cancel-1/cancel', handle.token, {});
+    expect(res.status).toBe(200);
+    expect(await json(res)).toMatchObject({ ok: true, id: 'route-cancel-1' });
+
+    // Unknown or already-finished jobs report 404.
+    expect((await post('/api/jobs/nope/cancel', handle.token, {})).status).toBe(404);
   });
 
   it('sets and clears a per-chat @-mention override, and drops it when the chat is removed', async () => {
