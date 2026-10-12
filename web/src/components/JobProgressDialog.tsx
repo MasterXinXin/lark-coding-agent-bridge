@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import type { JobStatus, JobView } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -20,18 +20,21 @@ const MAX_LOG_LINES = 2000;
 function statusBadge(status: JobStatus): { variant: "secondary" | "success" | "destructive"; text: string } {
   if (status === "succeeded") return { variant: "success", text: "完成" };
   if (status === "failed") return { variant: "destructive", text: "失败" };
+  if (status === "cancelled") return { variant: "secondary", text: "已取消" };
   return { variant: "secondary", text: "运行中" };
 }
 
 function stepLabel(status: JobStatus): string {
   if (status === "succeeded") return "完成";
   if (status === "failed") return "失败";
+  if (status === "cancelled") return "已取消";
   return "进行中";
 }
 
 function stepDotClass(status: JobStatus): string {
   if (status === "succeeded") return "bg-success";
   if (status === "failed") return "bg-destructive";
+  if (status === "cancelled") return "bg-muted-foreground";
   return "bg-primary animate-pulse";
 }
 
@@ -70,6 +73,7 @@ export function JobProgressDialog({
   const [lost, setLost] = useState(false);
   const [transientErrors, setTransientErrors] = useState(0);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [cancelling, setCancelling] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   /** Latest `onFinished` without making the polling effect depend on its identity. */
   const onFinishedRef = useRef(onFinished);
@@ -190,6 +194,18 @@ export function JobProgressDialog({
   const badge =
     lost && !snapshot ? { variant: "secondary" as const, text: "状态丢失" } : statusBadge(status);
 
+  // Once the job leaves `running`, a pending cancel request has landed.
+  useEffect(() => {
+    if (status !== "running") setCancelling(false);
+  }, [status]);
+
+  const requestCancel = async () => {
+    if (!jobId || cancelling) return;
+    setCancelling(true);
+    // A 404 means it already finished; the next poll reflects the final status.
+    await apiPost(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {}).catch(() => undefined);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
@@ -247,6 +263,9 @@ export function JobProgressDialog({
         {status === "failed" && snapshot?.error && (
           <p className="text-sm text-destructive">{snapshot.error}</p>
         )}
+        {status === "cancelled" && (
+          <p className="text-sm text-muted-foreground">{snapshot?.error ?? "任务已取消"}</p>
+        )}
         {lost && (
           <p className="text-sm text-muted-foreground">
             任务状态已丢失（可能已过期或服务已重启）。
@@ -258,9 +277,17 @@ export function JobProgressDialog({
 
         <DialogFooter>
           {status === "running" && !lost && (
-            <span className="mr-auto self-center text-xs text-muted-foreground">
-              关闭后任务会继续在后台运行。
-            </span>
+            <div className="mr-auto flex items-center gap-2">
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={cancelling}
+                onClick={() => void requestCancel()}
+              >
+                {cancelling ? "正在取消…" : "取消任务"}
+              </Button>
+              <span className="text-xs text-muted-foreground">关闭后任务会继续在后台运行</span>
+            </div>
           )}
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             关闭

@@ -229,7 +229,7 @@ export interface PullHistoryView {
 
 // ── background jobs (project add / pull) ─────────────────────────────────────
 
-export type JobStatus = "running" | "succeeded" | "failed";
+export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 export type JobStream = "stdout" | "stderr" | "info";
 
 export interface JobLogLine {
