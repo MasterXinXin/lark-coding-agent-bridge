@@ -1,6 +1,15 @@
 import { log } from '../core/logger';
 import { createGitRunner, type GitRunner } from '../git/git-ops';
-import { addProjects, pullProjects } from '../ui/workspace-api';
+import { HttpError } from '../ui/http';
+import { addProjects, listProjectTargets, pullProjects } from '../ui/workspace-api';
+import {
+  createCodegraphHook,
+  projectIndexInfo,
+  type CodegraphHook,
+  type CodegraphRunner,
+  type CommandRunner,
+  type ExecutableResolver,
+} from './codegraph';
 import { JobRegistry } from './jobs';
 
 /** Process-wide registry backing the console's `GET /api/jobs/:id` route. */
@@ -19,6 +28,16 @@ export interface StartJobDeps {
    * the capability for future use.
    */
   redact?: string[];
+  /** Test seam: a fully fake hook that bypasses detection and spawning. */
+  codegraph?: CodegraphHook;
+  /** Test seam: a recorder used to build the real hook. */
+  codegraphRunner?: CodegraphRunner;
+  /** Test seam: a recorder for the CLI install command. */
+  commandRunner?: CommandRunner;
+  /** Override the codegraph binary name. */
+  codegraphBin?: string;
+  /** Test seam: override executable resolution inside the hook. */
+  codegraphResolve?: ExecutableResolver;
 }
 
 type OnStep = (info: { id: string; name: string }) => void;
@@ -46,10 +65,10 @@ function pullLabel(body: unknown): string {
  * throw fails it. Errors never reject unhandled.
  */
 function beginJob(
-  kind: 'add' | 'pull',
+  kind: 'add' | 'pull' | 'codegraph',
   label: string,
   deps: StartJobDeps,
-  work: (runner: GitRunner, onStep: OnStep) => Promise<unknown>,
+  work: (runner: GitRunner, onStep: OnStep, codegraph: CodegraphHook | undefined) => Promise<unknown>,
 ): { id: string } {
   const registry = deps.registry ?? jobRegistry;
   const base = deps.runner ?? createGitRunner();
@@ -78,10 +97,22 @@ function beginJob(
   void (async () => {
     try {
       registry.append(jobId, { stream: 'info', text: `任务已启动：${label}` });
-      registry.finish(jobId, await work(runner, onStep));
+      const codegraph =
+        deps.codegraph ??
+        (await createCodegraphHook({
+          ...(deps.codegraphRunner ? { runner: deps.codegraphRunner } : {}),
+          ...(deps.commandRunner ? { commandRunner: deps.commandRunner } : {}),
+          ...(deps.codegraphBin ? { bin: deps.codegraphBin } : {}),
+          ...(deps.codegraphResolve ? { resolve: deps.codegraphResolve } : {}),
+          onOutput: (chunk) => registry.append(jobId, { stream: 'stderr', text: chunk }),
+        }).catch((err) => {
+          log.fail('workspace', err, { step: 'codegraph-hook', jobId });
+          return undefined;
+        }));
+      registry.finish(jobId, await work(runner, onStep, codegraph));
     } catch (err) {
       registry.fail(jobId, err instanceof Error ? err.message : String(err));
-      log.fail('workspace', err, { step: 'git-job', jobId });
+      log.fail('workspace', err, { step: 'workspace-job', jobId });
     }
   })().catch(() => undefined);
 
@@ -95,8 +126,8 @@ export function startAddJob(
   body: unknown,
   deps: StartJobDeps = {},
 ): { id: string } {
-  return beginJob('add', addLabel(body), deps, (runner, onStep) =>
-    addProjects(profile, rootDir, body, runner, onStep),
+  return beginJob('add', addLabel(body), deps, (runner, onStep, codegraph) =>
+    addProjects(profile, rootDir, body, runner, onStep, codegraph),
   );
 }
 
@@ -107,7 +138,90 @@ export function startPullJob(
   body: unknown,
   deps: StartJobDeps = {},
 ): { id: string } {
-  return beginJob('pull', pullLabel(body), deps, (runner, onStep) =>
-    pullProjects(profile, rootDir, body, runner, onStep),
+  return beginJob('pull', pullLabel(body), deps, (runner, onStep, codegraph) =>
+    pullProjects(profile, rootDir, body, runner, onStep, 'manual', codegraph),
+  );
+}
+
+interface CodegraphJobBody {
+  action?: unknown;
+  method?: unknown;
+  id?: unknown;
+  all?: unknown;
+}
+
+function codegraphLabel(raw: CodegraphJobBody): string {
+  switch (raw.action) {
+    case 'cli-install':
+      return '安装 CodeGraph CLI';
+    case 'mcp-install':
+      return '接入 CodeGraph MCP';
+    case 'init':
+      return raw.all === true ? '初始化全部未索引项目' : '初始化项目索引';
+    case 'sync':
+      return raw.all === true ? '同步全部项目索引' : '同步项目索引';
+    default:
+      return 'CodeGraph 操作';
+  }
+}
+
+async function runCodegraphAction(
+  profile: string,
+  rootDir: string | undefined,
+  raw: CodegraphJobBody,
+  codegraph: CodegraphHook | undefined,
+  onStep: OnStep,
+): Promise<unknown> {
+  if (!codegraph) throw new Error('codegraph 不可用：请先安装 CodeGraph CLI');
+  const action = typeof raw.action === 'string' ? raw.action : '';
+  if (action === 'cli-install') return codegraph.installCli(raw.method === 'npm' ? 'npm' : 'script');
+  if (action === 'mcp-install') return codegraph.wireMcp();
+  if (action !== 'init' && action !== 'sync') {
+    throw new HttpError(400, `未知的 codegraph 操作：${action}`);
+  }
+
+  const targets = await listProjectTargets(profile, rootDir);
+  let selected = targets;
+  if (raw.all !== true) {
+    const id = typeof raw.id === 'string' ? raw.id : '';
+    const found = targets.find((t) => t.id === id);
+    if (!found) throw new HttpError(404, `项目不存在：${id}`);
+    selected = [found];
+  }
+
+  const results: Array<{ id: string; name: string; ok: boolean; detail?: string }> = [];
+  for (const target of selected) {
+    const info = await projectIndexInfo(target.dir);
+    if (action === 'sync' && !info.indexed) {
+      results.push({
+        id: target.id,
+        name: target.name,
+        ok: false,
+        detail: '未索引，已跳过（可先初始化）',
+      });
+      continue;
+    }
+    if (action === 'init' && info.indexed) {
+      results.push({ id: target.id, name: target.name, ok: true, detail: '已索引，跳过' });
+      continue;
+    }
+    onStep({ id: target.id, name: target.name });
+    const outcome =
+      action === 'init' ? await codegraph.init(target.dir) : await codegraph.sync(target.dir);
+    results.push({ id: target.id, name: target.name, ...outcome });
+  }
+  return { results };
+}
+
+/** Start a background CodeGraph job (CLI install / MCP wire / init / sync). */
+export function startCodegraphJob(
+  profile: string,
+  rootDir: string | undefined,
+  body: unknown,
+  deps: StartJobDeps = {},
+): { id: string } {
+  const raw = (body && typeof body === 'object' ? body : {}) as CodegraphJobBody;
+  return beginJob('codegraph', codegraphLabel(raw), deps, (_runner, onStep, codegraph) =>
+    runCodegraphAction(profile, rootDir, raw, codegraph, onStep),
   );
 }

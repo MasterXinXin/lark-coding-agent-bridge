@@ -3,6 +3,7 @@ import { log } from '../core/logger';
 import { createGitRunner } from '../git/git-ops';
 import { listAllProfiles } from '../runtime/profile-discovery';
 import { pullProjects } from '../ui/workspace-api';
+import { createCodegraphHook } from './codegraph';
 import { MAX_RECORDS, readPullRecords, type PullResult } from './history';
 import { ProjectStore, type PullSchedule } from './projects';
 
@@ -105,7 +106,19 @@ export class PullScheduler {
     this.runProfile =
       deps.runProfile ??
       (async (profile) => {
-        const { results } = await pullProjects(profile, rootDir, {}, undefined, undefined, 'schedule');
+        const codegraph = await createCodegraphHook().catch((err) => {
+          log.warn('scheduler', 'codegraph-hook-failed', { profile, err: String(err) });
+          return undefined;
+        });
+        const { results } = await pullProjects(
+          profile,
+          rootDir,
+          {},
+          undefined,
+          undefined,
+          'schedule',
+          codegraph,
+        );
         return results.map((r) => ({ name: r.name, result: r.result, detail: r.detail }));
       });
     this.notify = deps.notify ?? (async () => false);

@@ -1,14 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { createRootConfig, saveRootConfig, writeActiveProfile } from '../../../src/config/profile-store';
 import { createGitRunner, type GitRunner } from '../../../src/git/git-ops';
-import { startAddJob, startPullJob } from '../../../src/workspace/git-jobs';
+import { startAddJob, startCodegraphJob, startPullJob } from '../../../src/workspace/git-jobs';
 import { JobRegistry, type JobSnapshot } from '../../../src/workspace/jobs';
-import type { ProjectsView } from '../../../src/ui/workspace-api';
+import type { CodegraphHook } from '../../../src/workspace/codegraph';
+import { addProjects, type ProjectsView } from '../../../src/ui/workspace-api';
 
 const app = { id: 'cli_test', secret: 's', tenant: 'feishu' as const };
 let rootDir: string;
@@ -140,5 +141,35 @@ describe('git jobs', { timeout: 60_000 }, () => {
 
     const result = snap.result as { results: Array<{ projectId: string; result: string }> };
     expect(result.results).toHaveLength(1);
+  });
+
+  it('runs a codegraph sync job and reports per-project results', async () => {
+    const origin = await makeOrigin(rootDir);
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'x' }] }, makeRecording([]));
+    await mkdir(join(workspace, 'x', '.codegraph'), { recursive: true });
+    await writeFile(join(workspace, 'x', '.codegraph', 'codegraph.db'), 'x');
+
+    const registry = new JobRegistry();
+    const syncDirs: string[] = [];
+    const hook: CodegraphHook = {
+      available: true,
+      init: async () => ({ ok: true }),
+      sync: async (dir) => {
+        syncDirs.push(dir);
+        return { ok: true };
+      },
+      installCli: async () => ({ ok: true }),
+      wireMcp: async () => ({ ok: true }),
+    };
+
+    const { id } = startCodegraphJob(
+      'claude',
+      rootDir,
+      { action: 'sync', all: true },
+      { registry, codegraph: hook },
+    );
+    const snap = await waitForJob(registry, id);
+    expect(snap.status).toBe('succeeded');
+    expect(syncDirs).toEqual([join(workspace, 'x')]);
   });
 });
