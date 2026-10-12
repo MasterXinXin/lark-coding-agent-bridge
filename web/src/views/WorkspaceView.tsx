@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
 import type {
   AccountsView,
+  CodegraphSystemView,
   DirListing,
   GitAccount,
   JobStatus,
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/sonner";
 import { GitAccountCard } from "@/components/GitAccountCard";
+import { CodegraphCard } from "@/components/CodegraphCard";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
 import type { AddProjectItem } from "@/components/AddProjectDialog";
 import { RemoveProjectDialog } from "@/components/RemoveProjectDialog";
@@ -40,6 +42,7 @@ export function WorkspaceView({ profile }: { profile: string }) {
   const activeJobKey = `lark.bridge.activeJob.${profile}`;
   const [view, setView] = useState<ProjectsView | null>(null);
   const [accounts, setAccounts] = useState<GitAccount[]>([]);
+  const [system, setSystem] = useState<CodegraphSystemView | null>(null);
   const [history, setHistory] = useState<PullRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -60,11 +63,14 @@ export function WorkspaceView({ profile }: { profile: string }) {
         apiGet<PullHistoryView>(`/api/pull-history?${q}&limit=50`).catch(
           () => ({ records: [] }) as PullHistoryView,
         ),
+        // CodeGraph status is advisory too: a probe failure must not blank the page.
+        apiGet<CodegraphSystemView>(`/api/codegraph?${q}`).catch(() => null),
       ])
-        .then(([v, a, h]) => {
+        .then(([v, a, h, cg]) => {
           setView(v);
           setAccounts(a.accounts);
           setHistory(h.records);
+          setSystem(cg);
           setError(null);
         })
         .catch((e) => setError(String((e as Error).message ?? e))),
@@ -160,6 +166,20 @@ export function WorkspaceView({ profile }: { profile: string }) {
     }
   }
 
+  async function codegraphAction(id: string, action: "init" | "sync") {
+    setBusy(true);
+    try {
+      const { jobId } = await apiPost<StartJobResponse>(`/api/codegraph/${action}?${q}`, { id });
+      localStorage.setItem(activeJobKey, jobId);
+      setJobId(jobId);
+      setJobOpen(true);
+    } catch (e) {
+      toast.error(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (error) return <p className="text-destructive text-sm">加载失败：{error}</p>;
   if (!view) return <p className="text-muted-foreground text-sm">加载中…</p>;
 
@@ -195,6 +215,19 @@ export function WorkspaceView({ profile }: { profile: string }) {
 
       <GitAccountCard onChanged={setAccounts} />
 
+      <CodegraphCard
+        profile={profile}
+        system={system}
+        busy={busy || jobRunning}
+        unindexedCount={view.projects.filter((p) => !p.codegraph?.indexed).length}
+        onJob={(id) => {
+          localStorage.setItem(activeJobKey, id);
+          setJobId(id);
+          setJobOpen(true);
+        }}
+        onRefresh={() => void load()}
+      />
+
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>项目（{view.projects.length}）</CardTitle>
@@ -220,10 +253,12 @@ export function WorkspaceView({ profile }: { profile: string }) {
             <ProjectRow
               key={p.id}
               project={p}
+              cliInstalled={system?.cli.installed ?? false}
               busy={busy || jobRunning}
               onPull={pull}
               onRemove={(p) => setRemoveTarget(p)}
               onBranch={setBranch}
+              onCodegraph={codegraphAction}
             />
           ))}
         </CardContent>
@@ -269,18 +304,28 @@ function statusBadge(p: ProjectView) {
   return <Badge variant="success">已最新</Badge>;
 }
 
+function codegraphBadge(p: ProjectView, cliInstalled: boolean) {
+  if (!cliInstalled) return <Badge variant="destructive">CodeGraph 不可用</Badge>;
+  if (p.codegraph?.indexed) return <Badge variant="success">已索引</Badge>;
+  return <Badge variant="secondary">未索引</Badge>;
+}
+
 function ProjectRow({
   project,
+  cliInstalled,
   busy,
   onPull,
   onRemove,
   onBranch,
+  onCodegraph,
 }: {
   project: ProjectView;
+  cliInstalled: boolean;
   busy: boolean;
   onPull: (id: string) => void;
   onRemove: (project: ProjectView) => void;
   onBranch: (id: string, branch: string) => void;
+  onCodegraph: (id: string, action: "init" | "sync") => void;
 }) {
   const [branch, setBranch] = useState(project.branch);
   useEffect(() => {
@@ -296,6 +341,12 @@ function ProjectRow({
         <div className="truncate text-xs text-muted-foreground">
           最后拉取：{formatTime(project.lastPullAt)}
         </div>
+        <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+          {codegraphBadge(project, cliInstalled)}
+          {project.codegraph?.indexed && (
+            <span>索引更新：{formatTime(project.codegraph.updatedAt)}</span>
+          )}
+        </div>
       </div>
       <Input
         className="h-8 w-[130px]"
@@ -305,6 +356,16 @@ function ProjectRow({
           if (branch.trim() && branch !== project.branch) onBranch(project.id, branch.trim());
         }}
       />
+      {cliInstalled && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => onCodegraph(project.id, project.codegraph?.indexed ? "sync" : "init")}
+        >
+          {project.codegraph?.indexed ? "同步索引" : "建索引"}
+        </Button>
+      )}
       <Button variant="outline" size="sm" disabled={busy} onClick={() => onPull(project.id)}>
         拉取
       </Button>
