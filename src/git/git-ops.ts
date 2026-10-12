@@ -28,13 +28,22 @@ export function createGitRunner(bin = 'git'): GitRunner {
       });
       let stdout = '';
       let stderr = '';
+      // A throwing consumer must never unwind the stream `data` handler: that
+      // would leave this promise unsettled. Swallow it and note it on stderr.
+      const emit = (chunk: string) => {
+        try {
+          opts.onOutput?.(chunk);
+        } catch (err) {
+          stderr += `\n[onOutput error] ${String(err)}\n`;
+        }
+      };
       child.stdout?.on('data', (chunk) => {
         stdout += String(chunk);
-        opts.onOutput?.(String(chunk));
+        emit(String(chunk));
       });
       child.stderr?.on('data', (chunk) => {
         stderr += String(chunk);
-        opts.onOutput?.(String(chunk));
+        emit(String(chunk));
       });
       const timer = opts.timeoutMs
         ? setTimeout(() => child.kill(), opts.timeoutMs)
@@ -123,8 +132,27 @@ export async function repoStatus(run: GitRunner, dir: string): Promise<RepoStatu
   return { branch, dirty, ahead, behind, hasUpstream };
 }
 
+/**
+ * Reduce raw git output to a short, human-readable failure detail. With
+ * `--progress` forced, git emits carriage-return progress frames and `NN%`
+ * completion lines on stderr ahead of the real `fatal:` line; drop those and
+ * keep the tail so the actionable line survives truncation.
+ */
+function failureDetail(out: GitResult): string {
+  const clean = (text: string): string =>
+    text
+      .split(/\r\n|\r|\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== '' && !/\d+%/.test(line))
+      .join('\n');
+  const cleaned = clean(out.stderr) || clean(out.stdout);
+  const tail = cleaned.length <= 500 ? cleaned : cleaned.slice(cleaned.length - 500);
+  const trimmed = tail.includes('\n') ? tail.slice(tail.indexOf('\n') + 1) : tail;
+  return trimmed.trim() || 'git 执行失败';
+}
+
 function failure(out: GitResult): PullOutcome {
-  return { status: 'failed', detail: (out.stderr.trim() || out.stdout.trim() || 'git 执行失败').slice(0, 500) };
+  return { status: 'failed', detail: failureDetail(out) };
 }
 
 export async function cloneRepo(
@@ -135,7 +163,7 @@ export async function cloneRepo(
   if (opts.branch) args.push('--branch', opts.branch);
   args.push('--', opts.repoUrl, opts.dir);
   const r = await run(args, { env: opts.env, timeoutMs: 300_000 });
-  if (r.code !== 0) throw new Error(`git clone 失败：${(r.stderr.trim() || r.stdout.trim()).slice(0, 500)}`);
+  if (r.code !== 0) throw new Error(`git clone 失败：${failureDetail(r)}`);
 }
 
 export async function pullRepo(run: GitRunner, dir: string, strategy: PullStrategy): Promise<PullOutcome> {

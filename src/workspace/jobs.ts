@@ -139,11 +139,15 @@ export class JobRegistry {
     job.endedAt = this.now();
   }
 
+  /**
+   * `append` scrubs log lines; the failure message is scrubbed here too so a
+   * secret cannot leak through `error`. `result` is stored verbatim.
+   */
   fail(jobId: string, error: string): void {
     const job = this.active(jobId);
     if (!job) return;
     job.status = 'failed';
-    job.error = error;
+    job.error = this.scrub(job, error);
     job.endedAt = this.now();
   }
 

@@ -73,6 +73,18 @@ describe('JobRegistry append', () => {
     reg.append(id, { stream: 'stdout', text: 'use SECRET and tok here\nplain' });
     expect(reg.get(id)!.logs.map((l) => l.text)).toEqual(['use *** and *** here', 'plain']);
   });
+
+  it('ignores an empty redact entry while still scrubbing real secrets', () => {
+    const reg = new JobRegistry();
+    const { id } = reg.create({ kind: 'k', label: 'l', redact: ['', 'SECRET'] });
+    expect(() => {
+      reg.append(id, { stream: 'stdout', text: 'use SECRET here' });
+      reg.fail(id, 'clone failed for SECRET');
+    }).not.toThrow();
+    const snap = reg.get(id)!;
+    expect(snap.logs.map((l) => l.text)).toEqual(['use *** here']);
+    expect(snap.error).toBe('clone failed for ***');
+  });
 });
 
 describe('JobRegistry steps', () => {
@@ -92,6 +104,18 @@ describe('JobRegistry steps', () => {
     reg.addStep(id, { id: 's1', name: 'repo-a' });
     reg.setStepStatus(id, 's1', 'succeeded');
     expect(reg.get(id)!.steps[0]!.status).toBe('succeeded');
+  });
+
+  it('addStep/setStepStatus are safe no-ops on a terminal job', () => {
+    const reg = new JobRegistry();
+    const { id } = reg.create({ kind: 'k', label: 'l' });
+    reg.addStep(id, { id: 's1', name: 'repo-a' });
+    reg.finish(id, 'ok');
+    expect(() => reg.addStep(id, { id: 's2', name: 'late' })).not.toThrow();
+    expect(() => reg.setStepStatus(id, 's1', 'failed')).not.toThrow();
+    const snap = reg.get(id)!;
+    expect(snap.steps).toHaveLength(1);
+    expect(snap.steps[0]!.status).toBe('running');
   });
 });
 
