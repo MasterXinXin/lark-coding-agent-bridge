@@ -4,8 +4,10 @@ import type { MutableProfileState } from '../config/config-ops';
 import type { Controls } from '../commands';
 import type { FetchLike } from '../git/providers';
 import type { GitRunner } from '../git/git-ops';
+import type { CodegraphHook, CodegraphRunner, CommandRunner } from '../workspace/codegraph';
 import type { JobRegistry } from '../workspace/jobs';
 import type { ManagedStatus } from '../runtime/supervisor';
+import type { CodegraphSystemView } from './codegraph-api';
 
 /**
  * The live per-profile runtime the console edits. The supervisor's `Controls`
@@ -48,6 +50,14 @@ export interface UiServerDeps {
   gitRunner?: GitRunner;
   /** Job registry backing `GET /api/jobs/:id`; defaults to the process-wide registry. */
   jobRegistry?: JobRegistry;
+  /** Injectable codegraph hook for jobs (tests pass a fake). */
+  codegraph?: CodegraphHook;
+  /** Injectable codegraph runner (tests pass a recorder). */
+  codegraphRunner?: CodegraphRunner;
+  /** Injectable command runner for CLI install (tests pass a recorder). */
+  commandRunner?: CommandRunner;
+  /** Override the system-status probe (tests pass a stub). */
+  codegraphStatus?: () => Promise<CodegraphSystemView>;
 }
 
 export interface UiServerHandle {

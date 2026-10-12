@@ -51,7 +51,14 @@ import {
   updateProjectBranch,
 } from './workspace-api';
 import { browseDirectory } from '../workspace/dir-browse';
-import { jobRegistry, startAddJob, startPullJob } from '../workspace/git-jobs';
+import {
+  jobRegistry,
+  startAddJob,
+  startCodegraphJob,
+  startPullJob,
+  type StartJobDeps,
+} from '../workspace/git-jobs';
+import { codegraphProjectStatsView, codegraphSystemView } from './codegraph-api';
 import type { Controls } from '../commands';
 import type { UiServerDeps, UiServerHandle } from './types';
 
@@ -136,6 +143,17 @@ async function resolveTargetState(
   const controls = deps.supervisor.controlsFor(profile);
   if (controls) return { profile, state: controls, live: true, controls };
   return { profile, state: await loadProfileState(profile, deps.rootDir), live: false };
+}
+
+/** Console deps → the workspace job layer's injectable deps. */
+function jobDeps(deps: UiServerDeps): StartJobDeps {
+  return {
+    ...(deps.gitRunner ? { runner: deps.gitRunner } : {}),
+    registry: deps.jobRegistry ?? jobRegistry,
+    ...(deps.codegraph ? { codegraph: deps.codegraph } : {}),
+    ...(deps.codegraphRunner ? { codegraphRunner: deps.codegraphRunner } : {}),
+    ...(deps.commandRunner ? { commandRunner: deps.commandRunner } : {}),
+  };
 }
 
 async function route(
@@ -310,10 +328,7 @@ async function route(
   if (path === '/api/projects' && p) {
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'no profile');
-    const { id: jobId } = startAddJob(profile, deps.rootDir, await readJsonBody(req), {
-      ...(deps.gitRunner ? { runner: deps.gitRunner } : {}),
-      registry: deps.jobRegistry ?? jobRegistry,
-    });
+    const { id: jobId } = startAddJob(profile, deps.rootDir, await readJsonBody(req), jobDeps(deps));
     sendJson(res, 202, { jobId });
     return;
   }
@@ -332,10 +347,52 @@ async function route(
   if (path === '/api/projects/pull' && p) {
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'no profile');
-    const { id: jobId } = startPullJob(profile, deps.rootDir, await readJsonBody(req), {
-      ...(deps.gitRunner ? { runner: deps.gitRunner } : {}),
-      registry: deps.jobRegistry ?? jobRegistry,
-    });
+    const { id: jobId } = startPullJob(profile, deps.rootDir, await readJsonBody(req), jobDeps(deps));
+    sendJson(res, 202, { jobId });
+    return;
+  }
+  // --- codegraph (per-project code index) ---
+  if (path === '/api/codegraph' && g) {
+    const status = deps.codegraphStatus ?? codegraphSystemView;
+    sendJson(res, 200, await status());
+    return;
+  }
+  if (path === '/api/codegraph/project' && g) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    const id = url.searchParams.get('id') ?? '';
+    if (!id) throw new HttpError(400, 'id is required');
+    sendJson(res, 200, await codegraphProjectStatsView(profile, deps.rootDir, id, deps.codegraphRunner));
+    return;
+  }
+  if (path === '/api/codegraph/cli/install' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    const body = (await readJsonBody(req)) as Record<string, unknown>;
+    const { id: jobId } = startCodegraphJob(profile, deps.rootDir, { ...body, action: 'cli-install' }, jobDeps(deps));
+    sendJson(res, 202, { jobId });
+    return;
+  }
+  if (path === '/api/codegraph/mcp/install' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    const { id: jobId } = startCodegraphJob(profile, deps.rootDir, { action: 'mcp-install' }, jobDeps(deps));
+    sendJson(res, 202, { jobId });
+    return;
+  }
+  if (path === '/api/codegraph/init' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    const body = (await readJsonBody(req)) as Record<string, unknown>;
+    const { id: jobId } = startCodegraphJob(profile, deps.rootDir, { ...body, action: 'init' }, jobDeps(deps));
+    sendJson(res, 202, { jobId });
+    return;
+  }
+  if (path === '/api/codegraph/sync' && p) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    const body = (await readJsonBody(req)) as Record<string, unknown>;
+    const { id: jobId } = startCodegraphJob(profile, deps.rootDir, { ...body, action: 'sync' }, jobDeps(deps));
     sendJson(res, 202, { jobId });
     return;
   }
