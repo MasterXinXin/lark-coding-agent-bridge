@@ -411,6 +411,21 @@ describe('Bridge command contracts', () => {
     const checkout = join(await realpath(h.tmp.workspace), 'origin');
     expect(await pathExists(checkout)).toBe(true);
   });
+
+  it('keeps the checkout when removing a project through /project rm', async () => {
+    const h = await createHarness();
+    const origin = await makeOrigin(h.tmp.root);
+
+    await expect(h.run(`/project add ${origin} main`)).resolves.toBe(true);
+    const checkout = join(await realpath(h.tmp.workspace), 'origin');
+    expect(await pathExists(checkout)).toBe(true);
+
+    await expect(h.run('/project rm origin')).resolves.toBe(true);
+    expect(lastMarkdown(h.channel)).toContain('已移除项目');
+    expect((await loadProjectStore(h)).list()).toHaveLength(0);
+    // Removing the record must never delete the on-disk checkout.
+    expect(await pathExists(join(checkout, '.git'))).toBe(true);
+  });
 });
 
 /** Load a profile's project store from the harness config's root dir. */

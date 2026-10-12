@@ -17,6 +17,7 @@ import {
   pullProjects,
   removeProject,
   resolveProjectDir,
+  resolveProjectId,
   setWorkspaceDir,
   updateProjectBranch,
 } from '../../../src/ui/workspace-api';
@@ -95,6 +96,20 @@ describe('workspace-api', { timeout: 30_000 }, () => {
     expect(view.workspaceDir).toBe(workspace);
     expect(view.projects).toHaveLength(1);
     expect(view.projects[0]).toMatchObject({ name: 'backend', branch: 'main', exists: true });
+  });
+
+  it('resolves a project by id or unique name and 404s otherwise', async () => {
+    const origin = await makeOrigin(rootDir);
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, branch: 'main', name: 'backend' }] });
+    const [entry] = (await projectsView('claude', rootDir)).projects;
+
+    expect(await resolveProjectId('claude', rootDir, entry!.id)).toBe(entry!.id);
+    expect(await resolveProjectId('claude', rootDir, 'backend')).toBe(entry!.id);
+
+    await expect(resolveProjectId('claude', rootDir, 'ghost')).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(resolveProjectId('claude', rootDir, 'ghost')).rejects.toBeInstanceOf(HttpError);
   });
 
   it('rolls back an add when the repo cannot be cloned', async () => {

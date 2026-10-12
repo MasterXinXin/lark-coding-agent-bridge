@@ -87,6 +87,7 @@ import type { ProcessPool } from '../bot/process-pool';
 import type { RunExecutor } from '../runtime/run-executor';
 import { RunRejected } from '../runtime/errors';
 import { validateAppCredentials } from '../utils/feishu-auth';
+import { HttpError } from '../ui/http';
 import {
   addProjects,
   pullProjects,
@@ -521,9 +522,34 @@ function workspaceTarget(ctx: CommandContext): { profile: string; rootDir: strin
   return { profile: ctx.controls.profile, rootDir: dirname(ctx.controls.configPath) };
 }
 
+type ProjectRef = { ok: true; id: string } | { ok: false; message: string };
+
+/**
+ * Resolve a project by id/name. Only a genuine 404 is reported as "not found";
+ * a corrupt/unreadable store surfaces its real error instead of masquerading as
+ * a missing project.
+ */
+async function resolveProjectRef(
+  profile: string,
+  rootDir: string,
+  ref: string,
+): Promise<ProjectRef> {
+  try {
+    return { ok: true, id: await resolveProjectId(profile, rootDir, ref) };
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 404) {
+      return { ok: false, message: `未找到项目：${ref}` };
+    }
+    return {
+      ok: false,
+      message: `读取项目失败：${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 async function handleWsDir(path: string, ctx: CommandContext): Promise<void> {
   if (!path) {
-    await reply(ctx, '用法：`/ws dir <绝对路径>`');
+    await reply(ctx, '用法：`/ws dir <路径>`');
     return;
   }
   const listing = await browseDirectory(path).catch(() => undefined);
@@ -552,12 +578,14 @@ const PULL_RESULT_LABELS: Record<PullRunItem['result'], string> = {
 
 async function handleWsPull(name: string, ctx: CommandContext): Promise<void> {
   const { profile, rootDir } = workspaceTarget(ctx);
-  const id = name
-    ? await resolveProjectId(profile, rootDir, name).catch(() => undefined)
-    : undefined;
-  if (name && !id) {
-    await reply(ctx, `未找到项目：${name}`);
-    return;
+  let id: string | undefined;
+  if (name) {
+    const found = await resolveProjectRef(profile, rootDir, name);
+    if (!found.ok) {
+      await reply(ctx, found.message);
+      return;
+    }
+    id = found.id;
   }
 
   let results: PullRunItem[];
@@ -650,13 +678,13 @@ async function handleProject(args: string, ctx: CommandContext): Promise<void> {
         return;
       }
       const { profile, rootDir } = workspaceTarget(ctx);
-      const id = await resolveProjectId(profile, rootDir, name).catch(() => undefined);
-      if (!id) {
-        await reply(ctx, `未找到项目：${name}`);
+      const found = await resolveProjectRef(profile, rootDir, name);
+      if (!found.ok) {
+        await reply(ctx, found.message);
         return;
       }
       try {
-        await removeProject(profile, rootDir, { id });
+        await removeProject(profile, rootDir, { id: found.id });
         await reply(ctx, `✓ 已移除项目 \`${name}\`（未删除磁盘目录）`);
       } catch (err) {
         await reply(ctx, `移除失败：${err instanceof Error ? err.message : String(err)}`);
@@ -664,20 +692,20 @@ async function handleProject(args: string, ctx: CommandContext): Promise<void> {
       return;
     }
     case 'branch': {
-      const name = parts[1] ?? '';
-      const branch = parts.slice(2).join(' ').trim();
+      const branch = parts[parts.length - 1] ?? '';
+      const name = parts.slice(1, -1).join(' ').trim();
       if (!name || !branch) {
         await reply(ctx, '用法：`/project branch <项目名> <分支>`');
         return;
       }
       const { profile, rootDir } = workspaceTarget(ctx);
-      const id = await resolveProjectId(profile, rootDir, name).catch(() => undefined);
-      if (!id) {
-        await reply(ctx, `未找到项目：${name}`);
+      const found = await resolveProjectRef(profile, rootDir, name);
+      if (!found.ok) {
+        await reply(ctx, found.message);
         return;
       }
       try {
-        await updateProjectBranch(profile, rootDir, { id, branch });
+        await updateProjectBranch(profile, rootDir, { id: found.id, branch });
         await reply(ctx, `✓ 已把 \`${name}\` 的分支改为 \`${branch}\``);
       } catch (err) {
         await reply(ctx, `改分支失败：${err instanceof Error ? err.message : String(err)}`);
