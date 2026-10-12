@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-export type JobStatus = 'running' | 'succeeded' | 'failed';
+export type JobStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type JobStream = 'stdout' | 'stderr' | 'info';
 
 export interface JobLogLine {
@@ -151,8 +151,23 @@ export class JobRegistry {
     job.endedAt = this.now();
   }
 
-  get(jobId: string, since = 0): JobSnapshot | undefined {
-    const job = this.jobs.get(jobId);
+  /**
+   * Mark a running job cancelled — its operation was killed and rolled back.
+   * Steps still mid-flight are stamped cancelled so the UI stops showing them
+   * as running.
+   */
+  cancel(jobId: string, detail?: string): void {
+    const job = this.active(jobId);
+    if (!job) return;
+    for (const step of job.steps) {
+      if (step.status === 'running') step.status = 'cancelled';
+    }
+    job.status = 'cancelled';
+    if (detail) job.error = this.scrub(job, detail);
+    job.endedAt = this.now();
+  }
+
+  get(jobId: string, since = 0): JobSnapshot | undefined {    const job = this.jobs.get(jobId);
     if (!job) return undefined;
     return {
       id: job.id,

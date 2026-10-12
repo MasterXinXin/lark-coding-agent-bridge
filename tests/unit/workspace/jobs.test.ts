@@ -159,6 +159,32 @@ describe('JobRegistry terminal states', () => {
   });
 });
 
+describe('JobRegistry cancel', () => {
+  it('marks the job and its running steps cancelled', () => {
+    const reg = new JobRegistry({ now: () => 11 });
+    const { id } = reg.create({ kind: 'add', label: 'l' });
+    reg.addStep(id, { id: 's1', name: 'a' });
+    reg.setStepStatus(id, 's1', 'succeeded');
+    reg.addStep(id, { id: 's2', name: 'b' });
+    reg.cancel(id, '已取消');
+    const snap = reg.get(id)!;
+    expect(snap.status).toBe('cancelled');
+    expect(snap.error).toBe('已取消');
+    expect(snap.endedAt).toBe(11);
+    expect(snap.steps.find((s) => s.id === 's1')!.status).toBe('succeeded');
+    expect(snap.steps.find((s) => s.id === 's2')!.status).toBe('cancelled');
+  });
+
+  it('ignores cancel on a terminal or unknown job', () => {
+    const reg = new JobRegistry();
+    const { id } = reg.create({ kind: 'k', label: 'l' });
+    reg.finish(id, 'ok');
+    reg.cancel(id, 'late');
+    expect(reg.get(id)!.status).toBe('succeeded');
+    expect(() => reg.cancel('nope')).not.toThrow();
+  });
+});
+
 describe('JobRegistry cleanup', () => {
   it('sweeps completed jobs past the ttl on create', () => {
     let t = 0;
