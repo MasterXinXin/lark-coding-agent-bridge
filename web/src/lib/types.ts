@@ -206,6 +206,26 @@ export interface RemoveProjectsView extends ProjectsView {
   removed?: RemovedProject;
 }
 
+// ── pull history (scheduled & manual) ────────────────────────────────────────
+
+export type PullResult = "updated" | "up-to-date" | "skipped" | "failed";
+export type PullTrigger = "schedule" | "manual";
+
+export interface PullRecord {
+  ts: string;
+  projectId: string;
+  name: string;
+  branch: string;
+  result: PullResult;
+  detail: string;
+  durationMs: number;
+  trigger: PullTrigger;
+}
+
+export interface PullHistoryView {
+  records: PullRecord[];
+}
+
 // ── background jobs (project add / pull) ─────────────────────────────────────
 
 export type JobStatus = "running" | "succeeded" | "failed";

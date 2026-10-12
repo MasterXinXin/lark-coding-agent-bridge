@@ -7,6 +7,9 @@ import type {
   JobStatus,
   ProjectView,
   ProjectsView,
+  PullHistoryView,
+  PullRecord,
+  PullSchedule,
   RemoveProjectsView,
   StartJobResponse,
 } from "@/lib/types";
@@ -28,12 +31,16 @@ import { AddProjectDialog } from "@/components/AddProjectDialog";
 import type { AddProjectItem } from "@/components/AddProjectDialog";
 import { RemoveProjectDialog } from "@/components/RemoveProjectDialog";
 import { JobProgressDialog } from "@/components/JobProgressDialog";
+import { ScheduleCard } from "@/components/ScheduleCard";
+import { PullHistoryCard } from "@/components/PullHistoryCard";
+import { formatTime } from "@/lib/format";
 
 export function WorkspaceView({ profile }: { profile: string }) {
   const q = `profile=${encodeURIComponent(profile)}`;
   const activeJobKey = `lark.bridge.activeJob.${profile}`;
   const [view, setView] = useState<ProjectsView | null>(null);
   const [accounts, setAccounts] = useState<GitAccount[]>([]);
+  const [history, setHistory] = useState<PullRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -49,10 +56,12 @@ export function WorkspaceView({ profile }: { profile: string }) {
       Promise.all([
         apiGet<ProjectsView>(`/api/projects?${q}`),
         apiGet<AccountsView>("/api/git/accounts"),
+        apiGet<PullHistoryView>(`/api/pull-history?${q}&limit=50`),
       ])
-        .then(([v, a]) => {
+        .then(([v, a, h]) => {
           setView(v);
           setAccounts(a.accounts);
+          setHistory(h.records);
           setError(null);
         })
         .catch((e) => setError(String((e as Error).message ?? e))),
@@ -151,6 +160,8 @@ export function WorkspaceView({ profile }: { profile: string }) {
   if (error) return <p className="text-destructive text-sm">加载失败：{error}</p>;
   if (!view) return <p className="text-muted-foreground text-sm">加载中…</p>;
 
+  const lastScheduledAt = history.find((r) => r.trigger === "schedule")?.ts;
+
   return (
     <div className="space-y-4">
       <Card>
@@ -169,6 +180,15 @@ export function WorkspaceView({ profile }: { profile: string }) {
           </p>
         </CardContent>
       </Card>
+
+      <ScheduleCard
+        profile={profile}
+        schedule={view.schedule}
+        lastScheduledAt={lastScheduledAt}
+        busy={busy}
+        onSaved={(next: PullSchedule) => setView((v) => (v ? { ...v, schedule: next } : v))}
+        onPullAll={() => void pull()}
+      />
 
       <GitAccountCard onChanged={setAccounts} />
 
@@ -205,6 +225,8 @@ export function WorkspaceView({ profile }: { profile: string }) {
           ))}
         </CardContent>
       </Card>
+
+      <PullHistoryCard records={history} busy={busy} onRefresh={() => void load()} />
 
       <DirectoryPicker open={pickerOpen} onOpenChange={setPickerOpen} busy={busy} onPick={setRoot} />
       <AddProjectDialog
@@ -268,6 +290,9 @@ function ProjectRow({
           {project.name} {statusBadge(project)}
         </div>
         <div className="truncate font-mono text-xs text-muted-foreground">{project.repoUrl}</div>
+        <div className="truncate text-xs text-muted-foreground">
+          最后拉取：{formatTime(project.lastPullAt)}
+        </div>
       </div>
       <Input
         className="h-8 w-[130px]"
