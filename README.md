@@ -236,9 +236,15 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/ws save <name>` | Save the current working directory as a named workspace |
 | `/ws use <name>` | Switch to a named workspace |
 | `/ws remove <name>` | Delete a named workspace |
+| `/ws dir <path>` | Set the profile's default workspace directory (new projects check out here) |
+| `/ws pull [project]` | Pull all (or one) project now |
+| `/ws schedule on\|off\|<minutes>` | Enable / disable scheduled pulls, or set the interval (5–1440 min) |
+| `/project add <url> [branch]` | Add a project manually and check it out |
+| `/project rm <name>` | Remove the project record (**without** deleting the on-disk directory) |
+| `/project branch <name> <branch>` | Change a project's tracked branch |
 | `/resume` | Resume compatible history for the same agent, working directory, and permission mode |
 | `/status` | Show profile, agent, working directory, session, lark-cli identity, and run state |
-| `/config` | Adjust presentation preferences, access settings, and lark-cli identity policy |
+| `/config` | Adjust presentation preferences, access settings, and lark-cli identity policy (workspace / git projects live in the console) |
 | `/invite user @name` | Allow a user to use the bot in DMs |
 | `/invite admin @name` | Add an access-control admin |
 | `/invite group` | Allow the current group to use the bot |
@@ -293,6 +299,9 @@ The management console (the `http://127.0.0.1:<port>/?token=…` URL the bridge 
 
 - **Add from an account**: once a Git account is configured you can list its remote repositories and add several at once with a per-repo branch; you can also paste a repository URL manually.
 - **Live progress**: add (clone) and pull run in the background while a progress dialog streams git's output (progress, `remote:` messages) and phases. Closing the dialog leaves the task running; reloading the page reconnects you to that task's progress view.
+- **Remove a project**: by default only the record is removed; the confirmation dialog offers "remove and delete the directory" to delete the local checkout too (a dirty tree / missing directory / non-git repo shows a red warning but can still be deleted).
+- **Scheduled pulls**: enable a profile-level schedule (interval 5–1440 min, strategy `ff-only` / `reset-hard`). The supervisor drives it, so offline profiles still pull; a locally dirty tree is skipped and recorded, never overwritten.
+- **Pull history**: every pull (scheduled or manual) is appended to `profiles/<profile>/pull-history.jsonl`; the console shows recent records and notifies the owner on failures (optional).
 - Only one add/pull task runs at a time. Task state lives in memory only, so an in-progress task is lost if the bridge restarts.
 
 ## Permission modes
