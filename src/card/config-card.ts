@@ -149,6 +149,17 @@ export function configFormCard(opts: ConfigFormOpts): object {
     },
   ];
 
+  // Prominent red pointer: workspace / Git accounts / projects / scheduled
+  // pulls are configured in the **browser console**, not on this card. The URL
+  // is present only while the supervisor (`--web-ui`) is running.
+  const consoleNotice =
+    `<font color='red'>**⚠️ 工作空间根目录、Git 账号与项目 / 定时拉取，请在浏览器控制台配置**</font>\n` +
+    `<font color='red'>这些项不在本卡片修改。打开控制台「工作空间」页即可管理目录、账号、项目与分支、定时拉取。</font>\n` +
+    (opts.consoleUrl
+      ? `<font color='red'>👉 打开 Web 控制台：[${opts.consoleUrl}](${opts.consoleUrl})</font>` +
+        `\n_（可管理所有 profile 的启动/停止、配置与工作空间）_`
+      : `_（未检测到控制台地址：请以 \`--web-ui\` 启动 bridge，然后重开本卡片即可看到链接）_`);
+
   return {
     schema: '2.0',
     config: { summary: { content: '偏好设置' } },
@@ -160,16 +171,7 @@ export function configFormCard(opts: ConfigFormOpts): object {
             '⚙️ **偏好设置**\n\n' +
             '调整 bot 的行为偏好。改完点提交后写入当前 profile 配置；消息和访问控制设置立即生效。',
         },
-        ...(opts.consoleUrl
-          ? [
-              {
-                tag: 'markdown',
-                content:
-                  `🖥️ **Web 控制台**（本机 127.0.0.1，可管理所有 profile 的启动/停止与配置）\n` +
-                  `[${opts.consoleUrl}](${opts.consoleUrl})`,
-              },
-            ]
-          : []),
+        { tag: 'markdown', content: consoleNotice },
         { tag: 'hr' },
         {
           tag: 'form',
