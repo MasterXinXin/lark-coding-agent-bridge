@@ -474,11 +474,24 @@ export async function createCodegraphHook(
     available: cli.installed,
     ...(cli.version ? { version: cli.version } : {}),
     init: async (dir) => {
+      const op = currentOperation();
+      const key = `codegraph-init:${dir}`;
+      op?.registerRollback(key, { kind: 'codegraph-init', dir });
       const result = await initProject(runner, dir, onOutput);
-      if (result.ok) await ensureCodegraphExcluded(dir).catch(() => undefined);
+      if (result.ok) {
+        await ensureCodegraphExcluded(dir).catch(() => undefined);
+        op?.commitRollback(key);
+      }
       return result;
     },
-    sync: (dir) => syncProject(runner, dir, onOutput),
+    sync: async (dir) => {
+      const op = currentOperation();
+      const key = `codegraph-sync:${dir}`;
+      op?.registerRollback(key, { kind: 'codegraph-sync', dir });
+      const result = await syncProject(runner, dir, onOutput);
+      if (result.ok) op?.commitRollback(key);
+      return result;
+    },
     wireMcp,
     installCli: async (method) => {
       const { command, args } = buildInstallCommand(method);

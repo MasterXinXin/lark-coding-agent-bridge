@@ -30,6 +30,7 @@ import {
   type CodegraphIndexInfo,
 } from '../workspace/codegraph';
 import { ProjectStore, type ProjectEntry, type PullSchedule } from '../workspace/projects';
+import { currentOperation } from '../workspace/operation-context';
 import { HttpError } from './http';
 import { loadProfileState } from './api';
 
@@ -207,6 +208,17 @@ export async function addProjects(
       const env = entry.accountId
         ? await gitEnvForAccount(entry.accountId, hostStorePaths(rootDir), usernames.get(entry.accountId))
         : undefined;
+      const op = currentOperation();
+      const rollbackKey = `add-checkout:${entry.id}`;
+      op?.registerRollback(rollbackKey, {
+        kind: 'add-checkout',
+        profile,
+        projectId: entry.id,
+        workspaceDir,
+        localPath,
+        dir,
+        ...(rootDir ? { rootDir } : {}),
+      });
       try {
         await ensureCheckout(runner, {
           repoUrl: entry.repoUrl,
@@ -217,8 +229,10 @@ export async function addProjects(
       } catch (err) {
         store.remove(entry.id);
         await store.flush().catch(() => undefined);
+        op?.commitRollback(rollbackKey);
         throw new HttpError(400, err instanceof Error ? err.message : String(err));
       }
+      op?.commitRollback(rollbackKey);
       if (codegraph?.available) {
         // Indexing is best-effort: a failure must not roll back a clone that
         // succeeded, so it only logs and the row shows "未索引" for a retry.
