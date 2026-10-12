@@ -11,6 +11,8 @@ export interface GitRunOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /** Observe git's raw stdout/stderr chunks live; the full output is still returned. */
+  onOutput?: (chunk: string) => void;
 }
 
 export type GitRunner = (args: string[], opts?: GitRunOptions) => Promise<GitResult>;
@@ -28,9 +30,11 @@ export function createGitRunner(bin = 'git'): GitRunner {
       let stderr = '';
       child.stdout?.on('data', (chunk) => {
         stdout += String(chunk);
+        opts.onOutput?.(String(chunk));
       });
       child.stderr?.on('data', (chunk) => {
         stderr += String(chunk);
+        opts.onOutput?.(String(chunk));
       });
       const timer = opts.timeoutMs
         ? setTimeout(() => child.kill(), opts.timeoutMs)
@@ -127,7 +131,7 @@ export async function cloneRepo(
   run: GitRunner,
   opts: { repoUrl: string; dir: string; branch?: string; env?: NodeJS.ProcessEnv },
 ): Promise<void> {
-  const args = ['clone'];
+  const args = ['clone', '--progress'];
   if (opts.branch) args.push('--branch', opts.branch);
   args.push('--', opts.repoUrl, opts.dir);
   const r = await run(args, { env: opts.env, timeoutMs: 300_000 });
@@ -142,12 +146,12 @@ export async function pullRepo(run: GitRunner, dir: string, strategy: PullStrate
   }
 
   if (strategy === 'fetch-only') {
-    const r = await run(['fetch', '--prune'], { cwd: dir, timeoutMs: 120_000 });
+    const r = await run(['fetch', '--prune', '--progress'], { cwd: dir, timeoutMs: 120_000 });
     return r.code === 0 ? { status: 'up-to-date', detail: '仅 fetch（未合并）' } : failure(r);
   }
 
   if (strategy === 'reset-hard') {
-    const fetch = await run(['fetch', '--prune'], { cwd: dir, timeoutMs: 120_000 });
+    const fetch = await run(['fetch', '--prune', '--progress'], { cwd: dir, timeoutMs: 120_000 });
     if (fetch.code !== 0) return failure(fetch);
     const reset = await run(['reset', '--hard', `origin/${before.branch ?? 'HEAD'}`], { cwd: dir });
     return reset.code === 0
@@ -155,7 +159,7 @@ export async function pullRepo(run: GitRunner, dir: string, strategy: PullStrate
       : failure(reset);
   }
 
-  const r = await run(['pull', '--ff-only'], { cwd: dir, timeoutMs: 120_000 });
+  const r = await run(['pull', '--ff-only', '--progress'], { cwd: dir, timeoutMs: 120_000 });
   if (r.code !== 0) return failure(r);
   if (/already up[ -]?to[ -]?date/i.test(r.stdout)) return { status: 'up-to-date', detail: '已最新' };
   const summary = r.stdout.trim().split('\n').filter(Boolean).slice(0, 2).join(' ');

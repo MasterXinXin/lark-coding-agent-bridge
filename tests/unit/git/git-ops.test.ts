@@ -94,7 +94,7 @@ describe('git-ops status/pull', () => {
       'rev-parse --abbrev-ref HEAD': { stdout: 'main\n' },
       'status --porcelain': { stdout: '' },
       'rev-list --left-right --count @{upstream}...HEAD': { stdout: '1\t0\n' },
-      'pull --ff-only': { stdout: 'Already up to date.\n' },
+      'pull --ff-only --progress': { stdout: 'Already up to date.\n' },
     });
     expect((await pullRepo(run, '/repo', 'ff-only')).status).toBe('up-to-date');
   });
