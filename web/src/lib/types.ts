@@ -195,6 +195,17 @@ export interface ProjectsView {
   schedule: PullSchedule;
 }
 
+export interface RemovedProject {
+  id: string;
+  dir?: string;
+  deleted: boolean;
+  warning?: string;
+}
+
+export interface RemoveProjectsView extends ProjectsView {
+  removed?: RemovedProject;
+}
+
 // ── background jobs (project add / pull) ─────────────────────────────────────
 
 export type JobStatus = "running" | "succeeded" | "failed";

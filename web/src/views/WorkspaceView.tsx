@@ -7,6 +7,7 @@ import type {
   JobStatus,
   ProjectView,
   ProjectsView,
+  RemoveProjectsView,
   StartJobResponse,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { toast } from "@/components/ui/sonner";
 import { GitAccountCard } from "@/components/GitAccountCard";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
 import type { AddProjectItem } from "@/components/AddProjectDialog";
+import { RemoveProjectDialog } from "@/components/RemoveProjectDialog";
 import { JobProgressDialog } from "@/components/JobProgressDialog";
 
 export function WorkspaceView({ profile }: { profile: string }) {
@@ -36,6 +38,7 @@ export function WorkspaceView({ profile }: { profile: string }) {
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<ProjectView | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobOpen, setJobOpen] = useState(false);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
@@ -96,11 +99,23 @@ export function WorkspaceView({ profile }: { profile: string }) {
     }
   }
 
-  async function remove(id: string) {
+  async function doRemove(deleteDir: boolean) {
+    if (!removeTarget) return;
     setBusy(true);
     try {
-      await apiPost(`/api/projects/remove?${q}`, { id });
-      toast.success("已移除（未删除磁盘目录）");
+      const res = await apiPost<RemoveProjectsView>(`/api/projects/remove?${q}`, {
+        id: removeTarget.id,
+        ...(deleteDir ? { deleteDir: true } : {}),
+      });
+      const removed = res.removed;
+      if (removed?.warning) {
+        const warn = (toast as { warning?: (message: string) => void }).warning;
+        if (warn) warn(removed.warning);
+        else toast(removed.warning);
+      } else {
+        toast.success(removed?.deleted ? "已移除并删除目录" : "已移除（保留目录）");
+      }
+      setRemoveTarget(null);
       await load();
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
@@ -184,7 +199,7 @@ export function WorkspaceView({ profile }: { profile: string }) {
               project={p}
               busy={busy || jobRunning}
               onPull={pull}
-              onRemove={remove}
+              onRemove={(p) => setRemoveTarget(p)}
               onBranch={setBranch}
             />
           ))}
@@ -198,6 +213,15 @@ export function WorkspaceView({ profile }: { profile: string }) {
         accounts={accounts}
         busy={busy || jobRunning}
         onAdd={addItems}
+      />
+      <RemoveProjectDialog
+        open={removeTarget !== null}
+        project={removeTarget}
+        busy={busy}
+        onOpenChange={(o) => {
+          if (!o) setRemoveTarget(null);
+        }}
+        onConfirm={doRemove}
       />
       <JobProgressDialog
         open={jobOpen}
@@ -230,7 +254,7 @@ function ProjectRow({
   project: ProjectView;
   busy: boolean;
   onPull: (id: string) => void;
-  onRemove: (id: string) => void;
+  onRemove: (project: ProjectView) => void;
   onBranch: (id: string, branch: string) => void;
 }) {
   const [branch, setBranch] = useState(project.branch);
@@ -256,7 +280,7 @@ function ProjectRow({
       <Button variant="outline" size="sm" disabled={busy} onClick={() => onPull(project.id)}>
         拉取
       </Button>
-      <Button variant="ghost" size="sm" disabled={busy} onClick={() => onRemove(project.id)}>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={() => onRemove(project)}>
         移除
       </Button>
     </div>
