@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
-import type { AccountsView, DirListing, GitAccount, ProjectView, ProjectsView } from "@/lib/types";
+import type {
+  AccountsView,
+  DirListing,
+  GitAccount,
+  ProjectView,
+  ProjectsView,
+  StartJobResponse,
+} from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,6 +24,9 @@ import { toast } from "@/components/ui/sonner";
 import { GitAccountCard } from "@/components/GitAccountCard";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
 import type { AddProjectItem } from "@/components/AddProjectDialog";
+import { JobProgressDialog } from "@/components/JobProgressDialog";
+
+const ACTIVE_JOB_KEY = "lark.bridge.activeJob";
 
 export function WorkspaceView({ profile }: { profile: string }) {
   const q = `profile=${encodeURIComponent(profile)}`;
@@ -26,6 +36,8 @@ export function WorkspaceView({ profile }: { profile: string }) {
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobOpen, setJobOpen] = useState(false);
 
   const load = useCallback(
     () =>
@@ -45,6 +57,15 @@ export function WorkspaceView({ profile }: { profile: string }) {
     void load();
   }, [load]);
 
+  // Reconnect to a job that was still running when the page was last closed.
+  useEffect(() => {
+    const saved = localStorage.getItem(ACTIVE_JOB_KEY);
+    if (saved) {
+      setJobId(saved);
+      setJobOpen(true);
+    }
+  }, []);
+
   async function setRoot(path: string) {
     setBusy(true);
     try {
@@ -62,9 +83,10 @@ export function WorkspaceView({ profile }: { profile: string }) {
   async function pull(id?: string) {
     setBusy(true);
     try {
-      await apiPost(`/api/projects/pull?${q}`, id ? { id } : {});
-      toast.success("已拉取");
-      await load();
+      const { jobId } = await apiPost<StartJobResponse>(`/api/projects/pull?${q}`, id ? { id } : {});
+      localStorage.setItem(ACTIVE_JOB_KEY, jobId);
+      setJobId(jobId);
+      setJobOpen(true);
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
     } finally {
@@ -97,10 +119,11 @@ export function WorkspaceView({ profile }: { profile: string }) {
   async function addItems(items: AddProjectItem[]) {
     setBusy(true);
     try {
-      await apiPost(`/api/projects?${q}`, { projects: items });
-      toast.success("已添加并检出");
+      const { jobId } = await apiPost<StartJobResponse>(`/api/projects?${q}`, { projects: items });
+      localStorage.setItem(ACTIVE_JOB_KEY, jobId);
+      setJobId(jobId);
       setAddOpen(false);
-      await load();
+      setJobOpen(true);
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
     } finally {
@@ -161,6 +184,15 @@ export function WorkspaceView({ profile }: { profile: string }) {
         accounts={accounts}
         busy={busy}
         onAdd={addItems}
+      />
+      <JobProgressDialog
+        open={jobOpen}
+        jobId={jobId}
+        onOpenChange={setJobOpen}
+        onFinished={() => {
+          localStorage.removeItem(ACTIVE_JOB_KEY);
+          void load();
+        }}
       />
     </div>
   );

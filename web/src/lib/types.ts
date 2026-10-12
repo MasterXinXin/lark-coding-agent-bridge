@@ -195,6 +195,42 @@ export interface ProjectsView {
   schedule: PullSchedule;
 }
 
+// ── background jobs (project add / pull) ─────────────────────────────────────
+
+export type JobStatus = "running" | "succeeded" | "failed";
+export type JobStream = "stdout" | "stderr" | "info";
+
+export interface JobLogLine {
+  seq: number;
+  stepId?: string;
+  stream: JobStream;
+  text: string;
+  at: number;
+}
+
+export interface JobStep {
+  id: string;
+  name: string;
+  status: JobStatus;
+}
+
+export interface JobView {
+  id: string;
+  kind: string;
+  label: string;
+  status: JobStatus;
+  steps: JobStep[];
+  logs: JobLogLine[];
+  result?: unknown;
+  error?: string;
+  startedAt: number;
+  endedAt?: number;
+}
+
+export interface StartJobResponse {
+  jobId: string;
+}
+
 // ── global git accounts & provider repos ─────────────────────────────────────
 
 export type GitProvider = "github" | "gitlab" | "gitea" | "other";
