@@ -95,7 +95,11 @@ describe('git jobs', { timeout: 60_000 }, () => {
     expect(snap.steps.map((s) => s.name)).toEqual(['x']);
     expect(snap.logs.some((l) => l.text.includes('任务已启动'))).toBe(true);
     const stepId = snap.steps[0]!.id;
-    expect(snap.logs.some((l) => l.stepId === stepId)).toBe(true);
+    // The recording runner must have received live git output, and the job
+    // must have forwarded it as stderr tagged with the project step (not just
+    // the `开始处理` info line, which carries the step id but a different stream).
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(snap.logs.some((l) => l.stepId === stepId && l.stream === 'stderr')).toBe(true);
 
     const result = snap.result as ProjectsView;
     expect(result.projects).toHaveLength(1);

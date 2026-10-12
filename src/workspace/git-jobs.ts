@@ -11,7 +11,13 @@ export interface StartJobDeps {
   runner?: GitRunner;
   /** Registry to record into; defaults to the process-wide `jobRegistry`. */
   registry?: JobRegistry;
-  /** Strings to scrub from every log line / error message. */
+  /**
+   * Strings to scrub from every log line / error message. Production passes
+   * none: git credentials are supplied via environment (`gitEnvForAccount` /
+   * credential helper) and never reach argv, stdout/stderr, or the job
+   * `result`, so nothing needs redacting at this layer. `JobRegistry` keeps
+   * the capability for future use.
+   */
   redact?: string[];
 }
 
@@ -48,7 +54,6 @@ function beginJob(
   const registry = deps.registry ?? jobRegistry;
   const base = deps.runner ?? createGitRunner();
   const { id: jobId } = registry.create({ kind, label, redact: deps.redact ?? [] });
-  registry.append(jobId, { stream: 'info', text: `任务已启动：${label}` });
 
   let currentStep: string | undefined;
   // git writes its progress/errors to stderr but `onOutput` does not expose
@@ -72,12 +77,13 @@ function beginJob(
 
   void (async () => {
     try {
+      registry.append(jobId, { stream: 'info', text: `任务已启动：${label}` });
       registry.finish(jobId, await work(runner, onStep));
     } catch (err) {
       registry.fail(jobId, err instanceof Error ? err.message : String(err));
       log.fail('workspace', err, { step: 'git-job', jobId });
     }
-  })();
+  })().catch(() => undefined);
 
   return { id: jobId };
 }

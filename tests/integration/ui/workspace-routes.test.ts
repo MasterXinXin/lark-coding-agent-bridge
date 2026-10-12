@@ -113,7 +113,9 @@ describe('workspace routes', { timeout: 30_000 }, () => {
 
     // `since` returns only lines newer than the given seq.
     const full = await json(await get(`/api/jobs/${jobId}`));
-    const lastSeq = full.logs.at(-1).seq as number;
+    const lastLog = full.logs.at(-1);
+    expect(lastLog).toBeDefined();
+    const lastSeq = lastLog.seq as number;
     expect(lastSeq).toBeGreaterThan(0);
     const inc = await json(await get(`/api/jobs/${jobId}?since=${lastSeq}`));
     expect(inc.logs).toHaveLength(0);
@@ -127,6 +129,24 @@ describe('workspace routes', { timeout: 30_000 }, () => {
 
     const removed = await json(await post('/api/projects/remove', { id }));
     expect(removed.projects).toHaveLength(0);
+  });
+
+  it('pulls projects via the pull route and records a pull job', async () => {
+    const origin = await makeOrigin(rootDir);
+    const created = await post('/api/projects', { projects: [{ repoUrl: origin, name: 'x' }] });
+    expect(created.status).toBe(202);
+    const { jobId: addJobId } = await json(created);
+    const addSnap = await waitForJob(addJobId);
+    expect(addSnap.status).toBe('succeeded');
+
+    const pulled = await post('/api/projects/pull', {});
+    expect(pulled.status).toBe(202);
+    const { jobId } = await json(pulled);
+    expect(typeof jobId).toBe('string');
+
+    const snap = await waitForJob(jobId);
+    expect(snap.status).toBe('succeeded');
+    expect(snap.kind).toBe('pull');
   });
 
   it('sets the workspace root override', async () => {

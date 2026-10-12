@@ -438,7 +438,8 @@ async function route(
   // --- background job progress (project add/pull) ---
   if (path.startsWith('/api/jobs/') && g) {
     const id = decodeURIComponent(path.slice('/api/jobs/'.length));
-    const since = Number(url.searchParams.get('since') ?? '0') || 0;
+    const n = Number(url.searchParams.get('since') ?? '0');
+    const since = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
     const snap = (deps.jobRegistry ?? jobRegistry).get(id, since);
     if (!snap) throw new HttpError(404, '任务不存在或已过期');
     sendJson(res, 200, snap);
