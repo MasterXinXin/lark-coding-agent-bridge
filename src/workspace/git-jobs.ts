@@ -11,6 +11,7 @@ import {
   type ExecutableResolver,
 } from './codegraph';
 import { JobRegistry } from './jobs';
+import { createProgressWriter, type ProgressWriter } from './output';
 
 /** Process-wide registry backing the console's `GET /api/jobs/:id` route. */
 export const jobRegistry = new JobRegistry();
@@ -95,22 +96,33 @@ function beginJob(
   };
 
   void (async () => {
+    let sink: ProgressWriter | undefined;
     try {
       registry.append(jobId, { stream: 'info', text: `任务已启动：${label}` });
-      const codegraph =
-        deps.codegraph ??
-        (await createCodegraphHook({
+      let codegraph = deps.codegraph;
+      if (!codegraph) {
+        // codegraph redraws progress with bare `\r` plus ANSI color/erase codes;
+        // collapse each logical line to its final frame so logs stay readable.
+        const writer = createProgressWriter((line) =>
+          registry.append(jobId, { stream: 'stderr', text: line }),
+        );
+        sink = writer;
+        codegraph = await createCodegraphHook({
           ...(deps.codegraphRunner ? { runner: deps.codegraphRunner } : {}),
           ...(deps.commandRunner ? { commandRunner: deps.commandRunner } : {}),
           ...(deps.codegraphBin ? { bin: deps.codegraphBin } : {}),
           ...(deps.codegraphResolve ? { resolve: deps.codegraphResolve } : {}),
-          onOutput: (chunk) => registry.append(jobId, { stream: 'stderr', text: chunk }),
+          onOutput: (chunk) => writer.push(chunk),
         }).catch((err) => {
           log.fail('workspace', err, { step: 'codegraph-hook', jobId });
           return undefined;
-        }));
-      registry.finish(jobId, await work(runner, onStep, codegraph));
+        });
+      }
+      const result = await work(runner, onStep, codegraph);
+      sink?.flush();
+      registry.finish(jobId, result);
     } catch (err) {
+      sink?.flush();
       registry.fail(jobId, err instanceof Error ? err.message : String(err));
       log.fail('workspace', err, { step: 'workspace-job', jobId });
     }

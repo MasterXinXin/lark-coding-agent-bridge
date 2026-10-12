@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { resolveExecutablePath } from '../cli/agent-detection';
 import { spawnProcess } from '../platform/spawn';
+import { stripAnsi } from './output';
 
 export interface CodegraphResult {
   code: number;
@@ -334,7 +335,7 @@ export interface CodegraphOpResult {
 const OP_TIMEOUT_MS = 10 * 60_000;
 
 function failureDetail(result: CodegraphResult, fallback: string): string {
-  return (result.stderr || result.stdout).trim().slice(-500) || fallback;
+  return stripAnsi(result.stderr || result.stdout).trim().slice(-500) || fallback;
 }
 
 export async function initProject(

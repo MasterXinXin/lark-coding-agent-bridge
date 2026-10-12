@@ -211,6 +211,11 @@ describe('initProject / syncProject', () => {
     const { runner } = recordingRunner(() => ({ code: 2, stderr: 'nope' }));
     expect(await initProject(runner, '/p')).toEqual({ ok: false, detail: 'nope' });
   });
+
+  it('strips ANSI from the failure detail', async () => {
+    const { runner } = recordingRunner(() => ({ code: 2, stderr: '\x1b[31mfatal: boom\x1b[0m' }));
+    expect(await initProject(runner, '/p')).toEqual({ ok: false, detail: 'fatal: boom' });
+  });
 });
 
 describe('buildInstallCommand', () => {

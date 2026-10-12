@@ -8,7 +8,7 @@ import { createRootConfig, saveRootConfig, writeActiveProfile } from '../../../s
 import { createGitRunner, type GitRunner } from '../../../src/git/git-ops';
 import { startAddJob, startCodegraphJob, startPullJob } from '../../../src/workspace/git-jobs';
 import { JobRegistry, type JobSnapshot } from '../../../src/workspace/jobs';
-import type { CodegraphHook } from '../../../src/workspace/codegraph';
+import type { CodegraphHook, CodegraphRunner } from '../../../src/workspace/codegraph';
 import { addProjects, type ProjectsView } from '../../../src/ui/workspace-api';
 
 const app = { id: 'cli_test', secret: 's', tenant: 'feishu' as const };
@@ -171,5 +171,45 @@ describe('git jobs', { timeout: 60_000 }, () => {
     const snap = await waitForJob(registry, id);
     expect(snap.status).toBe('succeeded');
     expect(syncDirs).toEqual([join(workspace, 'x')]);
+  });
+
+  it('sanitizes streamed codegraph output into clean log lines', async () => {
+    const origin = await makeOrigin(rootDir);
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'x' }] }, makeRecording([]));
+    // Left un-indexed so the init path runs.
+
+    const frames =
+      '┌  Initializing CodeGraph\n│\n◆  Initialized in C:\\repo\n' +
+      '\x1b[2m|\x1b[0m\n' +
+      '\r\x1b[K\x1b[2m|\x1b[0m  \x1b[32m*\x1b[0m Scanning files - 12 found\n' +
+      '\r\x1b[K\x1b[2m|\x1b[0m  \x1b[38;2;243;183;34m\x1b[1m.\x1b[0m Parsing code  0%' +
+      '\r\x1b[K\x1b[2m|\x1b[0m  \x1b[38;2;251;191;36m\x1b[1m*\x1b[0m Parsing code  100%\n' +
+      '\r\x1b[K\x1b[2m|\x1b[0m  \x1b[32m*\x1b[0m Resolving refs - done\n' +
+      '│\n◆  Indexed 2 files\n│\n●  4 nodes, 4 edges in 957ms\n│\n└  Done\n\n';
+
+    const runner: CodegraphRunner = async (args, opts) => {
+      if (args[0] === '--version') return { code: 0, stdout: '1.2.3\n', stderr: '' };
+      opts?.onOutput?.(frames);
+      return { code: 0, stdout: '', stderr: '' };
+    };
+
+    const registry = new JobRegistry();
+    const { id } = startCodegraphJob(
+      'claude',
+      rootDir,
+      { action: 'init', all: true },
+      { registry, codegraphRunner: runner, codegraphResolve: async () => '/fake/codegraph' },
+    );
+    const snap = await waitForJob(registry, id);
+    expect(snap.status).toBe('succeeded');
+
+    const texts = snap.logs.map((l) => l.text);
+    expect(texts).toContain('|  * Resolving refs - done');
+    expect(texts).toContain('◆  Indexed 2 files');
+    // The 0% frame was overwritten by 100%; only the final frame survives.
+    expect(texts.some((t) => t.includes('Parsing code  0%'))).toBe(false);
+    expect(texts).toContain('|  * Parsing code  100%');
+    // No raw escape or carriage-return bytes leak into the log.
+    expect(texts.every((t) => !t.includes('\x1b') && !t.includes('\r'))).toBe(true);
   });
 });
