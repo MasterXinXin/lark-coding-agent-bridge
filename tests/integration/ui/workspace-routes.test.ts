@@ -189,6 +189,12 @@ describe('workspace routes', { timeout: 30_000 }, () => {
     // ... and non-finite falls back to the default.
     const junk = await json(await get('/api/pull-history?limit=abc'));
     expect(Array.isArray(junk.records)).toBe(true);
+    // ... an over-large value is clamped (<= 500) and still served.
+    const huge = await json(await get('/api/pull-history?limit=1000'));
+    expect(huge.records).toHaveLength(1);
+    // ... and a present-but-empty limit uses the default rather than 1.
+    const empty = await json(await get('/api/pull-history?limit='));
+    expect(empty.records).toHaveLength(1);
   });
 
   it('sets the workspace root override', async () => {

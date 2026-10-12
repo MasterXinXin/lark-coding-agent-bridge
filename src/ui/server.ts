@@ -354,7 +354,8 @@ async function route(
   if (path === '/api/pull-history' && g) {
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'no profile');
-    const n = Number(url.searchParams.get('limit') ?? '50');
+    const rawLimit = url.searchParams.get('limit');
+    const n = rawLimit && rawLimit.trim() ? Number(rawLimit) : 50;
     const limit = Number.isFinite(n) ? Math.min(500, Math.max(1, Math.floor(n))) : 50;
     sendJson(res, 200, { records: await readPullHistory(profile, deps.rootDir, limit) });
     return;

@@ -95,6 +95,37 @@ describe('PullScheduler', () => {
     expect(runs).toEqual([]);
   });
 
+  it('tolerates checkGit and listProfiles throwing', async () => {
+    await writeSchedule('claude', { enabled: true, intervalMinutes: 5 });
+    const runs: string[] = [];
+    const runProfile = async (profile: string) => {
+      runs.push(profile);
+      return [];
+    };
+
+    const gitThrows = new PullScheduler({
+      rootDir,
+      listProfiles: async () => ['claude'],
+      runProfile,
+      checkGit: async () => {
+        throw new Error('git probe failed');
+      },
+    });
+    await expect(gitThrows.tick()).resolves.toBeUndefined();
+
+    const listThrows = new PullScheduler({
+      rootDir,
+      listProfiles: async () => {
+        throw new Error('discovery failed');
+      },
+      runProfile,
+      checkGit: async () => true,
+    });
+    await expect(listThrows.tick()).resolves.toBeUndefined();
+
+    expect(runs).toEqual([]);
+  });
+
   it('notifies the owner once with the failed project name when notifyOnFailure is on', async () => {
     await writeSchedule('claude', { enabled: true, intervalMinutes: 5, notifyOnFailure: true });
     const notified: Array<{ profile: string; message: string }> = [];

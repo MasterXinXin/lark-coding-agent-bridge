@@ -91,7 +91,11 @@ export class PullScheduler {
   /** Begin ticking; no-op if already started. Never blocks process exit. */
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => void this.tick(), this.intervalMs);
+    const every = Math.max(1000, Number.isFinite(this.intervalMs) ? this.intervalMs : DEFAULT_INTERVAL_MS);
+    this.timer = setInterval(
+      () => void this.tick().catch((err) => log.fail('scheduler', err, { step: 'tick' })),
+      every,
+    );
     this.timer.unref?.();
   }
 
@@ -107,11 +111,24 @@ export class PullScheduler {
     if (this.running) return;
     this.running = true;
     try {
-      if (!(await this.checkGit())) {
+      let gitOk: boolean;
+      try {
+        gitOk = await this.checkGit();
+      } catch (err) {
+        log.fail('scheduler', err, { step: 'check-git' });
+        return;
+      }
+      if (!gitOk) {
         log.warn('scheduler', 'git-unavailable', {});
         return;
       }
-      const profiles = await this.listProfiles();
+      let profiles: string[];
+      try {
+        profiles = await this.listProfiles();
+      } catch (err) {
+        log.fail('scheduler', err, { step: 'list-profiles' });
+        return;
+      }
       const now = this.now();
       for (const profile of profiles) {
         try {
