@@ -124,7 +124,10 @@ export function ScheduleCard({
                 value={intervalText}
                 onChange={(e) => setIntervalText(e.target.value.replace(/[^\d]/g, ""))}
                 onBlur={() => {
-                  if (intervalValid) setIntervalText(String(clampInterval(intervalNumber)));
+                  const n = Number(intervalText);
+                  if (intervalText.trim() && Number.isFinite(n)) {
+                    setIntervalText(String(clampInterval(n)));
+                  }
                 }}
                 disabled={disabled}
               />
@@ -180,7 +183,7 @@ export function ScheduleCard({
             保存
           </Button>
           {dirty && <span className="text-xs text-muted-foreground">有未保存的改动</span>}
-          <Button variant="outline" size="sm" disabled={busy} onClick={onPullAll}>
+          <Button variant="outline" size="sm" disabled={disabled} onClick={onPullAll}>
             立即拉取全部
           </Button>
           <span className="text-xs text-muted-foreground">

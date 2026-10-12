@@ -56,7 +56,10 @@ export function WorkspaceView({ profile }: { profile: string }) {
       Promise.all([
         apiGet<ProjectsView>(`/api/projects?${q}`),
         apiGet<AccountsView>("/api/git/accounts"),
-        apiGet<PullHistoryView>(`/api/pull-history?${q}&limit=50`),
+        // History is advisory: never let it take the whole workspace page down.
+        apiGet<PullHistoryView>(`/api/pull-history?${q}&limit=50`).catch(
+          () => ({ records: [] }) as PullHistoryView,
+        ),
       ])
         .then(([v, a, h]) => {
           setView(v);
