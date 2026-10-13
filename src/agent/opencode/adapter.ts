@@ -257,7 +257,7 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
     if (unrestricted) {
       this.roleConfigPath = undefined;
       this.server.setExtraEnv({});
-      if (hadKey && this.started) await this.restartForRole();
+      if (hadKey && this.started && !this.roleRestartDisabled()) await this.restartForRole();
       return;
     }
 
@@ -293,7 +293,12 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
       injected: filePath !== undefined,
     });
 
-    if (hadKey && this.started) await this.restartForRole();
+    if (hadKey && this.started && !this.roleRestartDisabled()) await this.restartForRole();
+  }
+
+  /** Escape hatch: defer role-config changes to the next profile start. */
+  private roleRestartDisabled(): boolean {
+    return (process.env.LARK_CHANNEL_OPENCODE_NO_ROLE_RESTART ?? '') === '1';
   }
 
   /** Write the generated role config under the OS temp dir. */

@@ -90,14 +90,20 @@ export class ClaudeAdapter implements AgentAdapter {
       missing: [],
     };
     if (opts.roleMcpEnabled !== undefined) {
-      mcpResult = buildClaudeMcpConfig({
-        mcpEnabled: opts.roleMcpEnabled,
-        definitions: this.roleMcpDefinitions(opts.cwd),
-      });
-      if (mcpResult.missing.length > 0) {
-        log.warn('agent', 'role-mcp-missing-definitions', { missing: mcpResult.missing });
+      try {
+        mcpResult = buildClaudeMcpConfig({
+          mcpEnabled: opts.roleMcpEnabled,
+          definitions: this.roleMcpDefinitions(opts.cwd),
+        });
+        if (mcpResult.missing.length > 0) {
+          log.warn('agent', 'role-mcp-missing-definitions', { missing: mcpResult.missing });
+        }
+        if (mcpResult.config) systemPromptFile.writeMcpConfig(mcpResult.config);
+      } catch (err) {
+        // Fail open: an unreadable definition set must not lock the user out.
+        log.warn('agent', 'role-mcp-definitions-failed', { err: String(err) });
+        mcpResult = { config: undefined, missing: [] };
       }
-      if (mcpResult.config) systemPromptFile.writeMcpConfig(mcpResult.config);
     }
 
     const args = [

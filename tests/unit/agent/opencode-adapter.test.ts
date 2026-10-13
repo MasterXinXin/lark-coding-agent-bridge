@@ -746,6 +746,7 @@ import { readFile } from 'node:fs/promises';
 
 describe('OpencodeAdapter role 2b enforcement', () => {
   const originalApi = process.env.LARK_CHANNEL_OPENCODE_API;
+  const originalNoRestart = process.env.LARK_CHANNEL_OPENCODE_NO_ROLE_RESTART;
 
   beforeEach(() => {
     resetState();
@@ -754,6 +755,8 @@ describe('OpencodeAdapter role 2b enforcement', () => {
   afterEach(() => {
     if (originalApi === undefined) delete process.env.LARK_CHANNEL_OPENCODE_API;
     else process.env.LARK_CHANNEL_OPENCODE_API = originalApi;
+    if (originalNoRestart === undefined) delete process.env.LARK_CHANNEL_OPENCODE_NO_ROLE_RESTART;
+    else process.env.LARK_CHANNEL_OPENCODE_NO_ROLE_RESTART = originalNoRestart;
   });
 
   async function readInjectedConfig(): Promise<unknown> {
@@ -835,6 +838,21 @@ describe('OpencodeAdapter role 2b enforcement', () => {
     await adapter.prepareRun({ runId: 'r1', prompt: 'hi', roleMcpEnabled: ['a'] });
     expect(serverState.extraEnv.at(-1)).toEqual({});
     expect(serverState.startCalls).toBe(1);
+  });
+
+  it('defers the restart when LARK_CHANNEL_OPENCODE_NO_ROLE_RESTART=1', async () => {
+    process.env.LARK_CHANNEL_OPENCODE_API = '2';
+    process.env.LARK_CHANNEL_OPENCODE_NO_ROLE_RESTART = '1';
+    const adapter = new OpencodeAdapter({
+      roleCatalog: async () => ({ mcp: ['a', 'b'], skills: [] }),
+    });
+    await adapter.prepareRun({ runId: 'r1', prompt: 'hi', roleMcpEnabled: ['a', 'b'] });
+    await adapter.prepareRun({ runId: 'r2', prompt: 'hi', roleMcpEnabled: ['a'] });
+    expect(serverState.stopCalls).toBe(0);
+    expect(serverState.startCalls).toBe(1);
+    expect(await readInjectedConfig()).toEqual({
+      permissions: [{ action: 'b_*', resource: '*', effect: 'deny' }],
+    });
   });
 });
 
