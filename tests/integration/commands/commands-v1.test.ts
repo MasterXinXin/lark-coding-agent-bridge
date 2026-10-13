@@ -9,6 +9,7 @@ import { resolveAppPaths } from '../../../src/config/app-paths.js';
 import { createDefaultProfileConfig, type ProfileConfig } from '../../../src/config/profile-schema.js';
 import { createRootConfig, loadRootConfig, saveRootConfig } from '../../../src/config/profile-store.js';
 import { SessionStore } from '../../../src/session/store.js';
+import { addProjects } from '../../../src/ui/workspace-api.js';
 import { ProjectStore } from '../../../src/workspace/projects.js';
 import { WorkspaceStore } from '../../../src/workspace/store.js';
 import { createFakeAgent } from '../../helpers/fake-agent.js';
@@ -369,12 +370,17 @@ describe('Bridge command contracts', () => {
     expect(lastMarkdown(h.channel)).toContain('用法');
   });
 
-  it('removes, re-branches, and rejects unknown projects through /project', async () => {
+  it('removes, switches branch, and rejects unknown projects through /project', async () => {
     const h = await createHarness();
-    await seedProject(h, 'api');
+    const rootDir = dirname(h.controls.configPath);
+    const origin = await makeOrigin(h.tmp.root);
+    const seed = join(h.tmp.root, 'seed');
+    git(seed, ['branch', 'release']);
+    git(seed, ['push', 'origin', 'release']);
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'api' }] });
 
     await expect(h.run('/project branch api release')).resolves.toBe(true);
-    expect(lastMarkdown(h.channel)).toContain('已把 `api` 的分支改为 `release`');
+    expect(lastMarkdown(h.channel)).toContain('切换到分支');
     expect((await loadProjectStore(h)).list()[0]?.branch).toBe('release');
 
     await expect(h.run('/project rm api')).resolves.toBe(true);

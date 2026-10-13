@@ -94,7 +94,7 @@ import {
   removeProject,
   resolveProjectId,
   setSchedule,
-  updateProjectBranch,
+  switchProjectBranch,
   type PullRunItem,
 } from '../ui/workspace-api';
 import { browseDirectory } from '../workspace/dir-browse';
@@ -705,10 +705,10 @@ async function handleProject(args: string, ctx: CommandContext): Promise<void> {
         return;
       }
       try {
-        await updateProjectBranch(profile, rootDir, { id: found.id, branch });
-        await reply(ctx, `✓ 已把 \`${name}\` 的分支改为 \`${branch}\``);
+        await switchProjectBranch(profile, rootDir, { id: found.id, branch });
+        await reply(ctx, `✓ 已把 \`${name}\` 切换到分支 \`${branch}\``);
       } catch (err) {
-        await reply(ctx, `改分支失败：${err instanceof Error ? err.message : String(err)}`);
+        await reply(ctx, `切换分支失败：${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }

@@ -42,18 +42,19 @@ import {
   sendJson,
 } from './http';
 import {
+  projectBranchesView,
   projectsView,
   readPullHistory,
   removeProject,
   setSchedule,
   getSchedule,
   setWorkspaceDir,
-  updateProjectBranch,
 } from './workspace-api';
 import { browseDirectory } from '../workspace/dir-browse';
 import {
   jobRegistry,
   startAddJob,
+  startBranchJob,
   startCodegraphJob,
   startPullJob,
   type StartJobDeps,
@@ -341,10 +342,19 @@ async function route(
     sendJson(res, 200, await removeProject(profile, deps.rootDir, await readJsonBody(req)));
     return;
   }
+  if (path === '/api/projects/branches' && g) {
+    const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
+    if (!profile) throw new HttpError(400, 'no profile');
+    const id = url.searchParams.get('id') ?? '';
+    if (!id) throw new HttpError(400, 'id is required');
+    sendJson(res, 200, await projectBranchesView(profile, deps.rootDir, id));
+    return;
+  }
   if (path === '/api/projects/branch' && p) {
     const profile = url.searchParams.get('profile') ?? (await readActiveProfile(deps.rootDir));
     if (!profile) throw new HttpError(400, 'no profile');
-    sendJson(res, 200, await updateProjectBranch(profile, deps.rootDir, await readJsonBody(req)));
+    const { id: jobId } = startBranchJob(profile, deps.rootDir, await readJsonBody(req), jobDeps(deps));
+    sendJson(res, 202, { jobId });
     return;
   }
   if (path === '/api/projects/pull' && p) {

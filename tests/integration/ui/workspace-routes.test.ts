@@ -203,4 +203,34 @@ describe('workspace routes', { timeout: 30_000 }, () => {
     const view = await json(await post('/api/workspace/root', { path: other }));
     expect(view.workspaceDir).toBe(await realpath(other));
   });
+
+  it('lists a project branches and switches via a job', async () => {
+    const origin = await makeOrigin(rootDir);
+    const seed = join(rootDir, 'seed');
+    git(seed, ['branch', 'release']);
+    git(seed, ['push', 'origin', 'release']);
+
+    const created = await post('/api/projects', { projects: [{ repoUrl: origin, name: 'x' }] });
+    const { jobId: addJob } = await json(created);
+    expect((await waitForJob(addJob)).status).toBe('succeeded');
+    const id = (await json(await get('/api/projects'))).projects[0].id;
+
+    const listed = await get(`/api/projects/branches?id=${id}`);
+    expect(listed.status).toBe(200);
+    const body = await json(listed);
+    expect(body.current).toBe('main');
+    expect(body.branches).toEqual(expect.arrayContaining(['main', 'release']));
+
+    const switched = await post('/api/projects/branch', { id, branch: 'release' });
+    expect(switched.status).toBe(202);
+    const { jobId } = await json(switched);
+    const snap = await waitForJob(jobId);
+    expect(snap.status).toBe('succeeded');
+    expect(snap.kind).toBe('branch');
+  });
+
+  it('400s a branch listing without an id', async () => {
+    const res = await get('/api/projects/branches');
+    expect(res.status).toBe(400);
+  });
 });

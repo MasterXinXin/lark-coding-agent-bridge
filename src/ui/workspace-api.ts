@@ -363,25 +363,6 @@ async function deleteProjectDir(workspaceDir: string, entry: ProjectEntry): Prom
   return { id: entry.id, dir, deleted: true };
 }
 
-export async function updateProjectBranch(
-  profile: string,
-  rootDir: string | undefined,
-  body: unknown,
-): Promise<ProjectsView> {
-  const raw = body as { branch?: unknown };
-  const branch = typeof raw?.branch === 'string' ? raw.branch : '';
-  const id = readId(body);
-  await withProjectStore(profile, rootDir, async (store) => {
-    try {
-      store.updateBranch(id, branch);
-    } catch (err) {
-      throw new HttpError(400, err instanceof Error ? err.message : String(err));
-    }
-    await store.flush();
-  });
-  return projectsView(profile, rootDir);
-}
-
 /**
  * Switch a project's checkout to `body.branch` and persist it. Refuses a dirty
  * tree, registers a rollback to the previous branch, and re-syncs the codegraph
