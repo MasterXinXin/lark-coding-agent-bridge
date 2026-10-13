@@ -30,6 +30,12 @@ function chosenToBody(chosen: Set<string>, names: string[]): string[] | null {
   return names.filter((n) => chosen.has(n));
 }
 
+const CAPABILITY_NOTE: Record<"control" | "readonly" | "none", string> = {
+  control: "保存后在下一次运行时强制生效（未勾选的会被禁用）。",
+  readonly: "只读：仅列出，本桥接不改动该端的配置。",
+  none: "",
+};
+
 function ScopeSection({
   title,
   capability,
@@ -49,9 +55,10 @@ function ScopeSection({
       <p className="text-sm font-medium">
         {title}
         {capability === "readonly" ? (
-          <span className="text-muted-foreground"> · 只读（二期 2b 支持）</span>
+          <span className="text-muted-foreground"> · 只读</span>
         ) : null}
       </p>
+      <p className="text-xs text-muted-foreground">{CAPABILITY_NOTE[capability]}</p>
       {!section.available ? (
         <p className="text-xs text-muted-foreground">{section.error ?? "无法读取"}（重试见上）。</p>
       ) : section.items.length === 0 ? (
@@ -198,8 +205,8 @@ export function RoleView({ profile }: { profile: string }) {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              勾选会保存到该 profile，但<strong>当前仅保存选择，尚未强制生效</strong>（将在二期 2b 落地）。
-              全选 = 不限制；全部取消 = 全部禁用。
+              勾选会保存到该 profile。全选 = 不限制；全部取消 = 全部禁用。是否强制生效取决于该端能力：
+              支持控制的端在下一次运行时生效；只读端仅展示。
             </p>
             {catalogError ? (
               <p className="text-destructive text-sm">

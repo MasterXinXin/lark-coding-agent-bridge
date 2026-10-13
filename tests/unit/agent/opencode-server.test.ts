@@ -1,7 +1,7 @@
 import { createServer, type AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 
-import { pickFreePort } from '../../../src/agent/opencode/server';
+import { buildServeEnv, pickFreePort } from '../../../src/agent/opencode/server';
 
 function listenEphemeral(): Promise<{ server: ReturnType<typeof createServer>; port: number }> {
   return new Promise((resolve) => {
@@ -23,6 +23,25 @@ function canBind(port: number): Promise<boolean> {
     server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)));
   });
 }
+
+describe('buildServeEnv', () => {
+  it('merges extraEnv and the generated password over the base env', () => {
+    const env = buildServeEnv(
+      { PATH: '/bin', OPENCODE_CONFIG: '/old.json' },
+      { password: 'pw', extraEnv: { OPENCODE_CONFIG: '/new.json', EXTRA: '1' } },
+    );
+    expect(env.PATH).toBe('/bin');
+    expect(env.OPENCODE_CONFIG).toBe('/new.json');
+    expect(env.EXTRA).toBe('1');
+    expect(env.OPENCODE_SERVER_PASSWORD).toBe('pw');
+  });
+
+  it('leaves the base env untouched when nothing is injected', () => {
+    const env = buildServeEnv({ PATH: '/bin' }, {});
+    expect(env.OPENCODE_CONFIG).toBeUndefined();
+    expect(env.OPENCODE_SERVER_PASSWORD).toBeUndefined();
+  });
+});
 
 describe('pickFreePort', () => {
   it('returns the preferred port when it is free', async () => {

@@ -18,6 +18,28 @@ export interface ServeOptions {
   apiVersion?: 1 | 2;
   /** Override the generated v2 server password (tests). */
   password?: string;
+  /**
+   * Extra environment variables for the spawned `opencode serve` process.
+   * The role 2b injection uses this to pass `OPENCODE_CONFIG` (a generated
+   * per-profile config file). Ignored when the adapter reuses a foreign v1
+   * server (we can't reconfigure a process we didn't spawn).
+   */
+  extraEnv?: Record<string, string>;
+}
+
+/**
+ * Compose the environment for the spawned `opencode serve`. Exported for tests.
+ * Order: process env < extraEnv (role injection) < generated password.
+ */
+export function buildServeEnv(
+  base: NodeJS.ProcessEnv,
+  opts: { password?: string; extraEnv?: Record<string, string> },
+): NodeJS.ProcessEnv {
+  return {
+    ...base,
+    ...(opts.extraEnv ?? {}),
+    ...(opts.password ? { OPENCODE_SERVER_PASSWORD: opts.password } : {}),
+  };
 }
 
 /** Resolve true when `port` on `host` can be bound (i.e. is currently free). */
@@ -77,11 +99,22 @@ export class OpencodeServer {
   private readonly password: string | undefined;
   /** For v2, the port actually bound (may differ from `opts.port`). */
   private boundPort: number | null = null;
+  /**
+   * Extra env for the child process. Mutable so the adapter can set
+   * `OPENCODE_CONFIG` right before `start()` once it has the run's whitelist.
+   */
+  private extraEnv: Record<string, string> = {};
 
   constructor(private readonly opts: ServeOptions) {
     this.apiVersion = opts.apiVersion ?? 1;
     this.password =
       this.apiVersion === 2 ? (opts.password ?? randomBytes(24).toString('base64url')) : undefined;
+    if (opts.extraEnv) this.extraEnv = { ...opts.extraEnv };
+  }
+
+  /** Merge additional env vars to inject into the spawned serve (before start()). */
+  setExtraEnv(env: Record<string, string>): void {
+    this.extraEnv = { ...env };
   }
 
   get baseUrl(): string {
@@ -95,6 +128,11 @@ export class OpencodeServer {
   get authHeader(): string | undefined {
     if (this.apiVersion !== 2 || !this.password) return undefined;
     return `Basic ${Buffer.from(`opencode:${this.password}`).toString('base64')}`;
+  }
+
+  /** True when `start()` attached to a pre-existing serve instead of spawning. */
+  get isReused(): boolean {
+    return this.reused;
   }
 
   async start(): Promise<void> {
@@ -118,9 +156,10 @@ export class OpencodeServer {
 
     const bin = this.opts.opencodePath ?? 'opencode';
     const args = ['serve', '--port', String(this.boundPort ?? this.opts.port), '--hostname', this.opts.host];
-    const env = this.password
-      ? { ...process.env, OPENCODE_SERVER_PASSWORD: this.password }
-      : process.env;
+    const env = buildServeEnv(process.env, {
+      password: this.password,
+      extraEnv: this.extraEnv,
+    });
     log.info('opencode.srv', 'spawn', { bin, args, apiVersion: this.apiVersion });
     const proc = spawnProcess(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env });
     this.proc = proc;

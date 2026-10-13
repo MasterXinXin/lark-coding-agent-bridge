@@ -67,6 +67,14 @@ export interface RunPolicyAllow {
   permissionMode: ClaudePermissionMode;
   /** Profile role (system-prompt soft constraint); omitted when blank. */
   rolePrompt?: string;
+  /**
+   * Phase 2b: MCP whitelist; `undefined` = unrestricted, `[]` = disable all,
+   * otherwise the allowed names. Not part of `policyFingerprint` — changing it
+   * must not invalidate an in-flight run.
+   */
+  roleMcpEnabled?: string[];
+  /** Phase 2b: skill whitelist; same tri-state as {@link roleMcpEnabled}. */
+  roleSkillsEnabled?: string[];
   access: AccessDecision;
   attachments: AgentAttachment[];
   policyFingerprint: string;
@@ -117,6 +125,8 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     input.profileConfig.permissions,
   );
   const rolePrompt = input.profileConfig.role?.prompt.trim();
+  const roleMcpEnabled = input.profileConfig.role?.mcpEnabled;
+  const roleSkillsEnabled = input.profileConfig.role?.skillsEnabled;
   const resourceDigest = resourceScopeDigest({
     source: input.scope.source,
     chatId: input.scope.chatId,
@@ -139,6 +149,8 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     sandbox,
     permissionMode,
     ...(rolePrompt ? { rolePrompt } : {}),
+    ...(roleMcpEnabled ? { roleMcpEnabled } : {}),
+    ...(roleSkillsEnabled ? { roleSkillsEnabled } : {}),
     access: input.access,
     attachments: input.attachments,
     expiresAt: input.now + (input.ttlMs ?? DEFAULT_TTL_MS),

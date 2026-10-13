@@ -92,7 +92,14 @@ export async function discoverOpencodeMcp(
   };
 }
 
-/** Parse an already-read opencode config object. Exported for tests. */
+/**
+ * Parse an already-read opencode config object. Exported for tests.
+ *
+ * Two shapes are accepted, mirroring the two config generations:
+ *   - v2: `mcp.servers.<name>` (current)
+ *   - v1: `mcp.<name>` (legacy, directly under `mcp`)
+ * v2's `servers` wins when present.
+ */
 export function opencodeMcpServers(config: unknown, source: string): McpServerEntry[] {
   if (!config || typeof config !== 'object') return [];
   const mcp = (config as { mcp?: unknown }).mcp;
@@ -114,6 +121,92 @@ function opencodeTransport(value: unknown): McpTransport {
     return typeof rec.url === 'string' && rec.url.includes('sse') ? 'sse' : 'http';
   }
   return 'unknown';
+}
+
+export interface OpencodeSkillOptions extends RoleCatalogOptions {
+  /** Project directory whose `.opencode/skills` (and compat dirs) should be scanned. */
+  workspaceDir?: string;
+}
+
+/** Human-readable label for an opencode config dir's `skills/`. */
+function opencodeSkillsLabel(dir: string, home: string): string {
+  return dir === join(home, '.config', 'opencode') ? '~/.config/opencode/skills' : `${dir}/skills`;
+}
+
+/** True when `dir/SKILL.md` exists (directory-form skill). */
+async function hasSkillFile(dir: string): Promise<boolean> {
+  try {
+    await readFile(join(dir, 'SKILL.md'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Skill IDs from opencode's skill sources: the global config dir(s) plus the
+ * `~/.claude` / `~/.agents` compatibility dirs, and (when a workspace is known)
+ * the project `.opencode` / `.claude` / `.agents` dirs. Markdown files at the
+ * source root become `<file>`; sub-directories containing `SKILL.md` become
+ * `<dir>`. Config-declared `skills` paths are not resolved.
+ */
+export async function discoverOpencodeSkills(
+  opts: OpencodeSkillOptions = {},
+): Promise<CatalogSection<SkillEntry>> {
+  const home = opts.home ?? homedir();
+  const sources: Array<[string, string]> = [];
+  for (const dir of opencodeConfigDirCandidates(opts.env, opts.platform, opts.home)) {
+    sources.push([join(dir, 'skills'), opencodeSkillsLabel(dir, home)]);
+  }
+  sources.push(
+    [join(home, '.claude', 'skills'), '~/.claude/skills'],
+    [join(home, '.agents', 'skills'), '~/.agents/skills'],
+  );
+  if (opts.workspaceDir) {
+    sources.push(
+      [join(opts.workspaceDir, '.opencode', 'skills'), '.opencode/skills'],
+      [join(opts.workspaceDir, '.claude', 'skills'), '.claude/skills'],
+      [join(opts.workspaceDir, '.agents', 'skills'), '.agents/skills'],
+    );
+  }
+  const items: SkillEntry[] = [];
+  const seen = new Set<string>();
+  for (const [dir, label] of sources) {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const name = entry.isDirectory()
+        ? ((await hasSkillFile(join(dir, entry.name))) ? entry.name : undefined)
+        : entry.name.endsWith('.md')
+          ? entry.name.slice(0, -3)
+          : undefined;
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      items.push({ name, source: label });
+    }
+  }
+  return { available: true, items };
+}
+
+/**
+ * Names the opencode enforcement can deny: every discovered MCP server and
+ * skill. Used by the adapter to turn a whitelist into `permissions` deny rules
+ * without inventing wildcards. Discovery failures degrade to empty lists.
+ */
+export async function discoverOpencodeRoleNames(
+  opts: OpencodeSkillOptions = {},
+): Promise<{ mcp: string[]; skills: string[] }> {
+  const emptyMcp: CatalogSection<McpServerEntry> = { available: false, items: [] };
+  const emptySkills: CatalogSection<SkillEntry> = { available: false, items: [] };
+  const [mcp, skills] = await Promise.all([
+    discoverOpencodeMcp(opts).catch(() => emptyMcp),
+    discoverOpencodeSkills(opts).catch(() => emptySkills),
+  ]);
+  return { mcp: mcp.items.map((i) => i.name), skills: skills.items.map((i) => i.name) };
 }
 
 export interface ClaudeCatalogPaths {
@@ -288,7 +381,7 @@ export async function buildRoleCatalog(
     switch (agentKind) {
       case 'opencode':
         mcp = await discoverOpencodeMcp(opts);
-        skills = { available: false, error: '2b 支持', items: [] };
+        skills = await discoverOpencodeSkills({ ...opts, workspaceDir });
         break;
       case 'codex':
         mcp = await discoverCodexMcp(codexHome);

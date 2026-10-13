@@ -70,6 +70,16 @@ export interface AgentRunOptions {
    */
   rolePrompt?: string;
   /**
+   * Phase 2b: per-profile MCP server whitelist from the run policy.
+   * `undefined` = unrestricted (follow native config), `[]` = disable all
+   * known servers, otherwise only the listed names are allowed. Setting this
+   * is what makes an adapter inject its enforcement (opencode `OPENCODE_CONFIG`
+   * / claude `--mcp-config`).
+   */
+  roleMcpEnabled?: string[];
+  /** Phase 2b: per-profile skill whitelist; same tri-state as {@link roleMcpEnabled}. */
+  roleSkillsEnabled?: string[];
+  /**
    * Grace period (ms) between SIGTERM and SIGKILL when stop() is called on
    * the returned run. Lets the agent (and any subprocess it spawned, e.g.
    * lark-cli mid-OAuth) clean up before the kernel reaps the tree.

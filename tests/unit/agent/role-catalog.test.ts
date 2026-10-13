@@ -19,7 +19,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach } from 'vitest';
-import { discoverClaudeMcp, discoverClaudeSkills, discoverOpencodeMcp, opencodeMcpServers } from '../../../src/agent/role-catalog';
+import { discoverClaudeMcp, discoverClaudeSkills, discoverOpencodeMcp, discoverOpencodeRoleNames, discoverOpencodeSkills, opencodeMcpServers } from '../../../src/agent/role-catalog';
 
 const cleanups: string[] = [];
 afterEach(async () => {
@@ -32,7 +32,7 @@ async function tempDir(): Promise<string> {
 }
 
 describe('opencode MCP discovery', () => {
-  it('reads server names (new `mcp.<name>` shape) and infers transport', () => {
+  it('reads server names from the legacy `mcp.<name>` (v1) shape and infers transport', () => {
     expect(
       opencodeMcpServers(
         {
@@ -51,7 +51,7 @@ describe('opencode MCP discovery', () => {
     ]);
   });
 
-  it('reads the legacy `mcp.servers.<name>` shape', () => {
+  it('reads the `mcp.servers.<name>` (v2) shape', () => {
     expect(opencodeMcpServers({ mcp: { servers: { old: { type: 'local' } } } }, 'opencode.json')).toEqual([
       { name: 'old', transport: 'stdio', source: 'opencode.json' },
     ]);
@@ -87,6 +87,73 @@ describe('opencode MCP discovery', () => {
     expect(section.available).toBe(false);
     expect(section.items).toEqual([]);
     expect(section.error).toBeTruthy();
+  });
+});
+
+describe('opencode skill discovery', () => {
+  it('reads markdown files and SKILL.md directories from global + workspace sources', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    const configDir = await tempDir();
+    await mkdir(join(configDir, 'skills', 'git-release'), { recursive: true });
+    await writeFile(join(configDir, 'skills', 'git-release', 'SKILL.md'), '# git release', 'utf8');
+    await writeFile(join(configDir, 'skills', 'review.md'), '# review', 'utf8');
+    await mkdir(join(home, '.claude', 'skills', 'compat'), { recursive: true });
+    await writeFile(join(home, '.claude', 'skills', 'compat', 'SKILL.md'), '# compat', 'utf8');
+    await mkdir(join(workspace, '.opencode', 'skills', 'local-skill'), { recursive: true });
+    await writeFile(join(workspace, '.opencode', 'skills', 'local-skill', 'SKILL.md'), '# local', 'utf8');
+
+    const section = await discoverOpencodeSkills({
+      env: { OPENCODE_CONFIG_DIR: configDir },
+      home,
+      workspaceDir: workspace,
+    });
+    expect(section.available).toBe(true);
+    expect(section.items.map((i) => i.name).sort()).toEqual(['compat', 'git-release', 'local-skill', 'review']);
+  });
+
+  it('ignores directories without SKILL.md and non-markdown files', async () => {
+    const workspace = await tempDir();
+    const configDir = await tempDir();
+    await mkdir(join(configDir, 'skills', 'not-a-skill'), { recursive: true });
+    await writeFile(join(configDir, 'skills', 'notes.txt'), 'x', 'utf8');
+
+    const section = await discoverOpencodeSkills({
+      env: { OPENCODE_CONFIG_DIR: configDir },
+      home: workspace,
+      workspaceDir: workspace,
+    });
+    expect(section).toEqual({ available: true, items: [] });
+  });
+
+  it('treats "no skill directories" as an available empty result', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    const section = await discoverOpencodeSkills({ home, workspaceDir: workspace });
+    expect(section).toEqual({ available: true, items: [] });
+  });
+});
+
+describe('discoverOpencodeRoleNames', () => {
+  it('returns the deny-able MCP and skill names', async () => {
+    const dir = await tempDir();
+    await writeFile(
+      join(dir, 'opencode.json'),
+      JSON.stringify({ mcp: { servers: { context7: { type: 'remote', url: 'https://x' } } } }),
+      'utf8',
+    );
+    await mkdir(join(dir, 'skills', 'deploy'), { recursive: true });
+    await writeFile(join(dir, 'skills', 'deploy', 'SKILL.md'), '# deploy', 'utf8');
+
+    const names = await discoverOpencodeRoleNames({ env: { OPENCODE_CONFIG_DIR: dir }, home: dir });
+    expect(names.mcp).toEqual(['context7']);
+    expect(names.skills).toEqual(['deploy']);
+  });
+
+  it('degrades to empty lists when nothing is found', async () => {
+    const dir = await tempDir();
+    const names = await discoverOpencodeRoleNames({ env: { OPENCODE_CONFIG_DIR: dir }, home: dir });
+    expect(names).toEqual({ mcp: [], skills: [] });
   });
 });
 
@@ -312,14 +379,16 @@ describe('buildRoleCatalog', () => {
     expect(view.skills).toEqual({ available: false, error: '该桥接无 skill', items: [] });
   });
 
-  it('dispatches opencode to file discovery and defers skills to 2b', async () => {
+  it('dispatches opencode to file discovery for MCP and skills', async () => {
     const dir = await tempDir();
     await writeFile(join(dir, 'opencode.json'), JSON.stringify({ mcp: { a: { type: 'local' } } }), 'utf8');
+    await mkdir(join(dir, 'skills', 'deploy'), { recursive: true });
+    await writeFile(join(dir, 'skills', 'deploy', 'SKILL.md'), '# deploy', 'utf8');
     const state = fakeState(join(dir, 'config.json'), { agentKind: 'opencode' });
-    const view = await buildRoleCatalog(state, { env: { OPENCODE_CONFIG_DIR: dir } });
+    const view = await buildRoleCatalog(state, { env: { OPENCODE_CONFIG_DIR: dir }, home: dir });
     expect(view.capabilities).toEqual({ mcp: 'control', skills: 'control' });
     expect(view.mcp.items).toEqual([{ name: 'a', transport: 'stdio', source: 'opencode.json' }]);
-    expect(view.skills.available).toBe(false);
+    expect(view.skills.items).toEqual([{ name: 'deploy', source: `${dir}/skills` }]);
   });
 
   it('degrades instead of throwing when path resolution fails', async () => {

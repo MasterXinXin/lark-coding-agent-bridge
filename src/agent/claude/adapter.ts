@@ -1,11 +1,12 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { log } from '../../core/logger';
 import { mergeProcessEnv, spawnProcess, type SpawnedProcessByStdio } from '../../platform/spawn';
 import { composeSystemPrompt } from '../bridge-system-prompt';
+import { buildClaudeMcpConfig, readClaudeMcpDefinitions } from './role-mcp';
 import { buildLarkChannelEnv, type LarkChannelEnvContext } from '../lark-channel-env';
 import { checkAgentAvailability, type AgentAvailability } from '../preflight';
 import {
@@ -21,6 +22,11 @@ import { translateEvent } from './stream-json';
 export interface ClaudeAdapterOptions {
   binary?: string;
   larkChannel?: LarkChannelEnvContext;
+  /**
+   * Phase 2b: resolve MCP server definitions for `--mcp-config`. Defaults to
+   * reading `~/.claude.json` + `<cwd>/.mcp.json`. Injectable for tests.
+   */
+  roleMcpDefinitions?: (workspaceDir: string) => Map<string, unknown>;
 }
 
 type ClaudeChild = SpawnedProcessByStdio<Writable, Readable, Readable>;
@@ -31,11 +37,15 @@ export class ClaudeAdapter implements AgentAdapter {
 
   private readonly binary: string;
   private readonly larkChannel: LarkChannelEnvContext | undefined;
+  private readonly roleMcpDefinitions: (workspaceDir: string) => Map<string, unknown>;
   private botIdentity: AgentBotIdentity | undefined;
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.binary = opts.binary ?? 'claude';
     this.larkChannel = opts.larkChannel;
+    this.roleMcpDefinitions =
+      opts.roleMcpDefinitions ??
+      ((workspaceDir: string) => readClaudeMcpDefinitions({ home: homedir(), workspaceDir }));
   }
 
   setBotIdentity(identity: AgentBotIdentity): void {
@@ -68,9 +78,27 @@ export class ClaudeAdapter implements AgentAdapter {
     // stream-json response. Pass the prompt via stdin and the appended system
     // prompt via a temp file (the same approach the Codex adapter uses) so no
     // special characters ever reach the shell.
-    const systemPromptFile = writeSystemPromptFile(
+    const systemPromptFile = writeClaudeTempFiles(
       composeSystemPrompt(this.botIdentity, opts.rolePrompt),
     );
+
+    // Phase 2b: enforce the profile's MCP whitelist by handing claude an
+    // explicit `--mcp-config` + `--strict-mcp-config`. `undefined` means the
+    // user never scoped MCP, so we leave claude's native config alone.
+    let mcpResult: { config: { mcpServers: Record<string, unknown> } | undefined; missing: string[] } = {
+      config: undefined,
+      missing: [],
+    };
+    if (opts.roleMcpEnabled !== undefined) {
+      mcpResult = buildClaudeMcpConfig({
+        mcpEnabled: opts.roleMcpEnabled,
+        definitions: this.roleMcpDefinitions(opts.cwd),
+      });
+      if (mcpResult.missing.length > 0) {
+        log.warn('agent', 'role-mcp-missing-definitions', { missing: mcpResult.missing });
+      }
+      if (mcpResult.config) systemPromptFile.writeMcpConfig(mcpResult.config);
+    }
 
     const args = [
       '-p',
@@ -82,6 +110,9 @@ export class ClaudeAdapter implements AgentAdapter {
       '--append-system-prompt-file',
       systemPromptFile.path,
     ];
+    if (mcpResult.config && systemPromptFile.mcpConfigPath) {
+      args.push('--mcp-config', systemPromptFile.mcpConfigPath, '--strict-mcp-config');
+    }
     if (opts.sessionId) args.push('--resume', opts.sessionId);
     if (opts.model) args.push('--model', opts.model);
 
@@ -273,16 +304,30 @@ async function* createEventStream(
 }
 
 /**
- * Persist the appended system prompt to a throwaway temp file so it can be
- * passed via `--append-system-prompt-file` instead of argv. Returns the path
- * plus an idempotent, best-effort cleanup that removes the temp directory.
+ * Persist the run's throwaway files (appended system prompt + optional
+ * `--mcp-config` JSON) to one temp dir. Returns paths plus an idempotent,
+ * best-effort cleanup that removes the directory.
  */
-function writeSystemPromptFile(content: string): { path: string; cleanup: () => void } {
+function writeClaudeTempFiles(content: string): {
+  path: string;
+  mcpConfigPath: string | undefined;
+  writeMcpConfig: (config: Record<string, unknown>) => void;
+  cleanup: () => void;
+} {
   const dir = mkdtempSync(join(tmpdir(), 'lark-claude-'));
   const path = join(dir, 'append-system-prompt.md');
   writeFileSync(path, content, 'utf8');
+  const state: { mcpConfigPath: string | undefined } = { mcpConfigPath: undefined };
   return {
     path,
+    get mcpConfigPath(): string | undefined {
+      return state.mcpConfigPath;
+    },
+    writeMcpConfig(config: Record<string, unknown>): void {
+      const target = join(dir, 'mcp-config.json');
+      writeFileSync(target, JSON.stringify(config), 'utf8');
+      state.mcpConfigPath = target;
+    },
     cleanup: () => {
       try {
         rmSync(dir, { recursive: true, force: true });

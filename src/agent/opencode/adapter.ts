@@ -1,5 +1,10 @@
+import { randomBytes } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { log } from '../../core/logger';
 import { SpawnFailed } from '../../runtime/errors';
+import { discoverOpencodeRoleNames } from '../role-catalog';
 import { checkAgentAvailability, type AgentAvailability } from '../preflight';
 import type {
   AgentAdapter,
@@ -10,6 +15,7 @@ import type {
   WakeUpCapableAdapter,
 } from '../types';
 import { OpencodeClient } from './client';
+import { buildOpencodeRoleConfig, type OpencodeRoleInjection } from './role-config';
 import { OpencodeServer } from './server';
 import { OpencodeSessionConsumer, type OpencodeSessionConsumerDeps } from './session-consumer';
 import type { OpencodeSessionClient } from './transport';
@@ -34,6 +40,12 @@ export interface OpencodeAdapterOptions {
    * the watchdog (the run will hang forever if the user never clicks).
    */
   permissionTimeoutMs?: number;
+  /**
+   * Phase 2b: resolves the MCP server names + skill IDs opencode can be told to
+   * deny (the "known" universe). Defaults to on-disk discovery; tests can inject
+   * a fake to avoid the filesystem.
+   */
+  roleCatalog?: (workspaceDir?: string) => Promise<{ mcp: string[]; skills: string[] }>;
 }
 
 const DEFAULT_PORT = 4096;
@@ -75,6 +87,7 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
   private readonly defaultModel: string | undefined;
   private readonly defaultStopGraceMs: number;
   private readonly permissionTimeoutMs: number;
+  private readonly roleCatalog: (workspaceDir?: string) => Promise<{ mcp: string[]; skills: string[] }>;
   private server!: OpencodeServer;
   private client!: OpencodeClient;
   private v2Client: OpencodeV2Client | undefined;
@@ -82,6 +95,15 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
   /** opencode HTTP API generation the current transport speaks. */
   private apiVersion: 1 | 2 = 1;
   private botIdentity: AgentBotIdentity | undefined;
+  /**
+   * Fingerprint of the last role config injected into the serve's env. Lets
+   * `prepareRun` detect a whitelist change and restart the server to apply it.
+   */
+  private roleKey: string | undefined;
+  /** Path of the generated `OPENCODE_CONFIG` file, if any. */
+  private roleConfigPath: string | undefined;
+  /** Stable per-adapter file name so restarts overwrite instead of leaking. */
+  private readonly roleFileId = randomBytes(8).toString('hex');
   /**
    * Whether `server.start()` has already resolved successfully on this
    * adapter instance. OpencodeServer.start() is internally idempotent, but
@@ -99,6 +121,8 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
     this.defaultStopGraceMs = opts.stopGraceMs ?? 5000;
     this.permissionTimeoutMs =
       opts.permissionTimeoutMs ?? DEFAULT_PERMISSION_TIMEOUT_MS;
+    this.roleCatalog =
+      opts.roleCatalog ?? ((workspaceDir?: string) => discoverOpencodeRoleNames({ workspaceDir }));
     // Start on v1; `prepareRun` swaps to v2 once `opencode --version` is known
     // (or when `LARK_CHANNEL_OPENCODE_API` forces it). Building v1 eagerly keeps
     // the constructor synchronous and the default path byte-identical.
@@ -173,7 +197,7 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
     });
   }
 
-  async prepareRun(_opts: AgentRunOptions): Promise<void> {
+  async prepareRun(opts: AgentRunOptions): Promise<void> {
     const availability = await this.checkAvailability();
     if (!availability.ok) {
       throw new SpawnFailed(
@@ -191,6 +215,7 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
       });
       this.configureTransport(apiVersion);
     }
+    await this.applyRoleConfig(opts);
     if (this.started) return;
     try {
       await this.server.start();
@@ -202,6 +227,104 @@ export class OpencodeAdapter implements AgentAdapter, WakeUpCapableAdapter {
       );
     }
     this.started = true;
+    if (this.roleConfigPath && this.server.isReused) {
+      log.warn('opencode.adapter', 'role-config-reused-server', {
+        detail: 'v1 reused a foreign serve; OPENCODE_CONFIG cannot be applied',
+      });
+    }
+  }
+
+  /**
+   * Phase 2b: translate the run's MCP / skill whitelist into a generated
+   * `OPENCODE_CONFIG` file and put its path in the serve's env. When the
+   * whitelist changes after the server is already up, restart the server (and
+   * close its sessions) so the new config takes effect. Set
+   * `LARK_CHANNEL_OPENCODE_NO_ROLE_RESTART=1` to defer changes to the next
+   * profile start instead.
+   */
+  private async applyRoleConfig(opts: AgentRunOptions): Promise<void> {
+    const unrestricted = opts.roleMcpEnabled === undefined && opts.roleSkillsEnabled === undefined;
+    const key = JSON.stringify([
+      this.apiVersion,
+      unrestricted ? null : (opts.roleMcpEnabled ?? null),
+      unrestricted ? null : (opts.roleSkillsEnabled ?? null),
+    ]);
+    if (key === this.roleKey) return;
+    const hadKey = this.roleKey !== undefined;
+    this.roleKey = key;
+
+    // Nothing to enforce: never touch the filesystem or the env.
+    if (unrestricted) {
+      this.roleConfigPath = undefined;
+      this.server.setExtraEnv({});
+      if (hadKey && this.started) await this.restartForRole();
+      return;
+    }
+
+    let injection: OpencodeRoleInjection;
+    try {
+      const names = await this.roleCatalog(opts.cwd);
+      injection = buildOpencodeRoleConfig(this.apiVersion, {
+        mcpEnabled: opts.roleMcpEnabled,
+        skillsEnabled: opts.roleSkillsEnabled,
+        knownMcp: names.mcp,
+        knownSkills: names.skills,
+      });
+    } catch (err) {
+      log.warn('opencode.adapter', 'role-config-discovery-failed', { err: String(err) });
+      injection = { config: undefined, deniedMcp: [], deniedSkills: [] };
+    }
+
+    let filePath: string | undefined;
+    if (injection.config) {
+      try {
+        filePath = await this.writeRoleConfig(injection.config);
+      } catch (err) {
+        log.warn('opencode.adapter', 'role-config-write-failed', { err: String(err) });
+        filePath = undefined;
+      }
+    }
+    this.roleConfigPath = filePath;
+    this.server.setExtraEnv(filePath ? { OPENCODE_CONFIG: filePath } : {});
+    log.info('opencode.adapter', 'role-config', {
+      apiVersion: this.apiVersion,
+      deniedMcp: injection.deniedMcp,
+      deniedSkills: injection.deniedSkills,
+      injected: filePath !== undefined,
+    });
+
+    if (hadKey && this.started) await this.restartForRole();
+  }
+
+  /** Write the generated role config under the OS temp dir. */
+  private async writeRoleConfig(config: Record<string, unknown>): Promise<string> {
+    const dir = join(tmpdir(), 'lark-bridge-opencode');
+    await mkdir(dir, { recursive: true });
+    const file = join(dir, `role-${this.roleFileId}.json`);
+    await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+    return file;
+  }
+
+  /** Stop the serve, close sessions, rebuild for the new role config, restart. */
+  private async restartForRole(): Promise<void> {
+    log.info('opencode.adapter', 'role-config-restart', { apiVersion: this.apiVersion });
+    await this.closeAllSessions().catch(() => {});
+    try {
+      await this.server.stop();
+    } catch (err) {
+      log.warn('opencode.adapter', 'role-config-restart-stop-failed', { err: String(err) });
+    }
+    this.configureTransport(this.apiVersion);
+    this.server.setExtraEnv(
+      this.roleConfigPath ? { OPENCODE_CONFIG: this.roleConfigPath } : {},
+    );
+    try {
+      await this.server.start();
+      this.started = true;
+    } catch (err) {
+      this.started = false;
+      log.warn('opencode.adapter', 'role-config-restart-start-failed', { err: String(err) });
+    }
   }
 
   run(opts: AgentRunOptions): AgentRun {

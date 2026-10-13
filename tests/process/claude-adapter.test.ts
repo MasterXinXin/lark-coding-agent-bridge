@@ -229,8 +229,48 @@ describe('ClaudeAdapter process contract', () => {
     expect(record.systemPrompt).toContain('## 角色设定');
     expect(record.systemPrompt).toContain('你是财务助手');
   });
-});
 
+  it('enforces the MCP whitelist with --mcp-config + --strict-mcp-config', async () => {
+    const fake = await createFakeClaude({
+      lines: [{ type: 'result', session_id: 'sess-mcp' }],
+    });
+    cleanup.push(fake.dir);
+    const defs = new Map<string, unknown>([
+      ['alpha', { command: 'a' }],
+      ['beta', { command: 'b' }],
+    ]);
+
+    const run = new ClaudeAdapter({ binary: fake.path, roleMcpDefinitions: () => defs }).run({
+      runId: 'run-mcp',
+      prompt: 'hi',
+      cwd: fake.dir,
+      roleMcpEnabled: ['alpha'],
+    });
+    await collect(run.events);
+    const record = await readRecord(fake.recordPath);
+
+    expect(record.argv).toContain('--mcp-config');
+    expect(record.argv).toContain('--strict-mcp-config');
+    expect(JSON.parse(record.mcpConfig!)).toEqual({ mcpServers: { alpha: { command: 'a' } } });
+  });
+
+  it('passes no --mcp-config when MCP is unscoped', async () => {
+    const fake = await createFakeClaude({
+      lines: [{ type: 'result', session_id: 'sess-nomcp' }],
+    });
+    cleanup.push(fake.dir);
+
+    const run = new ClaudeAdapter({ binary: fake.path, roleMcpDefinitions: () => new Map() }).run({
+      runId: 'run-nomcp',
+      prompt: 'hi',
+      cwd: fake.dir,
+    });
+    await collect(run.events);
+    const record = await readRecord(fake.recordPath);
+    expect(record.argv).not.toContain('--mcp-config');
+    expect(record.argv).not.toContain('--strict-mcp-config');
+  });
+});
 async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {
   const out: AgentEvent[] = [];
   for await (const event of events) out.push(event);
@@ -254,6 +294,8 @@ async function createFakeClaude(options: {
       'const argv = process.argv.slice(2);',
       'const spIdx = argv.indexOf("--append-system-prompt-file");',
       'const systemPrompt = spIdx !== -1 ? readFileSync(argv[spIdx + 1], "utf8") : null;',
+      'const mcIdx = argv.indexOf("--mcp-config");',
+      'const mcpConfig = mcIdx !== -1 ? readFileSync(argv[mcIdx + 1], "utf8") : null;',
       'let stdin = "";',
       'process.stdin.on("data", (c) => { stdin += c; });',
       'process.stdin.on("end", () => {',
@@ -261,6 +303,7 @@ async function createFakeClaude(options: {
       '    argv,',
       '    stdin,',
       '    systemPrompt,',
+      '    mcpConfig,',
       '    cwd: process.cwd(),',
       '    env: {',
       '      LARK_CHANNEL: process.env.LARK_CHANNEL,',
@@ -286,6 +329,7 @@ async function readRecord(path: string): Promise<{
   argv: string[];
   stdin: string;
   systemPrompt: string | null;
+  mcpConfig: string | null;
   cwd: string;
   env: {
     LARK_CHANNEL?: string;
@@ -299,6 +343,7 @@ async function readRecord(path: string): Promise<{
     argv: string[];
     stdin: string;
     systemPrompt: string | null;
+    mcpConfig: string | null;
     cwd: string;
     env: {
       LARK_CHANNEL?: string;

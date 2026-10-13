@@ -20,6 +20,9 @@ const clientState = vi.hoisted(() => ({
 const serverState = vi.hoisted(() => ({
   baseUrl: 'http://127.0.0.1:65535',
   startCalls: 0,
+  stopCalls: 0,
+  reused: false,
+  extraEnv: [] as Array<Record<string, string>>,
 }));
 
 const streamState = vi.hoisted(() => ({
@@ -86,6 +89,15 @@ vi.mock('../../../src/agent/opencode/server', () => {
     }
     get baseUrl(): string {
       return serverState.baseUrl;
+    }
+    get isReused(): boolean {
+      return serverState.reused;
+    }
+    setExtraEnv(env: Record<string, string>): void {
+      serverState.extraEnv.push({ ...env });
+    }
+    stop(): void {
+      serverState.stopCalls += 1;
     }
     async start(): Promise<void> {
       serverState.startCalls += 1;
@@ -169,6 +181,9 @@ function resetState(): void {
   clientState.replyPermissionCalls = [];
   clientState.nextSessionId = 'sess-A';
   serverState.startCalls = 0;
+  serverState.stopCalls = 0;
+  serverState.reused = false;
+  serverState.extraEnv = [];
   streamState.scheduledStart = null;
   streamState.instances = [];
 }
@@ -726,3 +741,100 @@ describe('OpencodeAdapter per-scope session cache', () => {
     expect(clientState.abortCalls.sort()).toEqual(['sess-A', 'sess-B']);
   });
 });
+
+import { readFile } from 'node:fs/promises';
+
+describe('OpencodeAdapter role 2b enforcement', () => {
+  const originalApi = process.env.LARK_CHANNEL_OPENCODE_API;
+
+  beforeEach(() => {
+    resetState();
+  });
+
+  afterEach(() => {
+    if (originalApi === undefined) delete process.env.LARK_CHANNEL_OPENCODE_API;
+    else process.env.LARK_CHANNEL_OPENCODE_API = originalApi;
+  });
+
+  async function readInjectedConfig(): Promise<unknown> {
+    const last = serverState.extraEnv.at(-1);
+    expect(last?.OPENCODE_CONFIG).toBeTruthy();
+    return JSON.parse(await readFile(last!.OPENCODE_CONFIG!, 'utf8'));
+  }
+
+  it('injects nothing when the whitelist is undefined', async () => {
+    const adapter = new OpencodeAdapter();
+    await adapter.prepareRun({ runId: 'r1', prompt: 'hi' });
+    expect(serverState.extraEnv.at(-1)).toEqual({});
+    expect(serverState.startCalls).toBe(1);
+  });
+
+  it('generates a v2 permissions config from the whitelist', async () => {
+    process.env.LARK_CHANNEL_OPENCODE_API = '2';
+    const adapter = new OpencodeAdapter({
+      roleCatalog: async () => ({ mcp: ['a', 'b'], skills: ['s1', 's2'] }),
+    });
+    await adapter.prepareRun({
+      runId: 'r1',
+      prompt: 'hi',
+      cwd: '/work',
+      roleMcpEnabled: ['a'],
+      roleSkillsEnabled: ['s1'],
+    });
+    expect(await readInjectedConfig()).toEqual({
+      permissions: [
+        { action: 'b_*', resource: '*', effect: 'deny' },
+        { action: 'skill', resource: 's2', effect: 'deny' },
+      ],
+    });
+  });
+
+  it('generates a v1 mcp.<name>.enabled config from the whitelist', async () => {
+    const adapter = new OpencodeAdapter({
+      roleCatalog: async () => ({ mcp: ['a', 'b'], skills: [] }),
+    });
+    await adapter.prepareRun({
+      runId: 'r1',
+      prompt: 'hi',
+      cwd: '/work',
+      roleMcpEnabled: ['a'],
+    });
+    expect(await readInjectedConfig()).toEqual({ mcp: { b: { enabled: false } } });
+  });
+
+  it('injects nothing when the discovered universe is empty', async () => {
+    process.env.LARK_CHANNEL_OPENCODE_API = '2';
+    const adapter = new OpencodeAdapter({ roleCatalog: async () => ({ mcp: [], skills: [] }) });
+    await adapter.prepareRun({ runId: 'r1', prompt: 'hi', roleMcpEnabled: ['a'] });
+    expect(serverState.extraEnv.at(-1)).toEqual({});
+  });
+
+  it('restarts the serve when the whitelist changes after start', async () => {
+    process.env.LARK_CHANNEL_OPENCODE_API = '2';
+    const adapter = new OpencodeAdapter({
+      roleCatalog: async () => ({ mcp: ['a', 'b'], skills: [] }),
+    });
+    await adapter.prepareRun({ runId: 'r1', prompt: 'hi', roleMcpEnabled: ['a', 'b'] });
+    expect(serverState.startCalls).toBe(1);
+    expect(serverState.stopCalls).toBe(0);
+
+    await adapter.prepareRun({ runId: 'r2', prompt: 'hi', roleMcpEnabled: ['a'] });
+    expect(serverState.stopCalls).toBe(1);
+    expect(serverState.startCalls).toBe(2);
+    expect(await readInjectedConfig()).toEqual({
+      permissions: [{ action: 'b_*', resource: '*', effect: 'deny' }],
+    });
+  });
+
+  it('degrades to no injection when discovery fails', async () => {
+    const adapter = new OpencodeAdapter({
+      roleCatalog: async () => {
+        throw new Error('boom');
+      },
+    });
+    await adapter.prepareRun({ runId: 'r1', prompt: 'hi', roleMcpEnabled: ['a'] });
+    expect(serverState.extraEnv.at(-1)).toEqual({});
+    expect(serverState.startCalls).toBe(1);
+  });
+});
+
