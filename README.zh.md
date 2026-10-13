@@ -313,6 +313,7 @@ profile 详情页的「角色」页用于给该 profile 写一段**角色设定*
 - 它是提示词层的约束（身份、语气、边界），**不是硬权限**；真正的权限在「配置」页的访问控制里。
 - 在线 profile 保存后**下一轮运行即生效**；离线 profile 保存后**下次启动生效**。
 - 空内容保存即清除角色。
+- 「角色」页还列出现该 profile 的 **MCP server 与 skill**，并允许勾选生效范围。一期（2a）**只保存选择、尚未强制生效**；真正的按 profile 限制在二期 2b 落地。目录来自本地配置文件（opencode `opencode.json(c)`、claude `~/.claude.json` 与工作区 `.mcp.json`、codex `config.toml`），探测失败会提示可重试，不影响角色本身。
 
 ## 权限模式
 

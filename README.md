@@ -313,6 +313,7 @@ The profile detail page's **Role** tab lets you write a **role** for that profil
 - It constrains identity, tone, and boundaries at the prompt layer. It is **not a hard permission** — real permissions live in the **Configuration** tab's access control.
 - An online profile takes effect on the **next run** after saving; an offline profile takes effect on its **next start**.
 - Saving an empty prompt clears the role.
+- The Role tab also lists the profile's **MCP servers and skills** and lets you pick which apply. Phase 2a **only stores the selection — it is not enforced yet**; per-profile restriction lands in phase 2b. The catalog is read from local config files (opencode `opencode.json(c)`, claude `~/.claude.json` and the workspace `.mcp.json`, codex `config.toml`); a failed probe shows a retry hint and never affects the role itself.
 
 ## Permission modes
 
