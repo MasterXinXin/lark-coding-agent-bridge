@@ -15,11 +15,11 @@ describe('roleScope', () => {
   });
 });
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach } from 'vitest';
-import { discoverOpencodeMcp, opencodeMcpServers } from '../../../src/agent/role-catalog';
+import { discoverClaudeMcp, discoverClaudeSkills, discoverOpencodeMcp, opencodeMcpServers } from '../../../src/agent/role-catalog';
 
 const cleanups: string[] = [];
 afterEach(async () => {
@@ -87,5 +87,61 @@ describe('opencode MCP discovery', () => {
     expect(section.available).toBe(false);
     expect(section.items).toEqual([]);
     expect(section.error).toBeTruthy();
+  });
+});
+
+describe('claude MCP + skill discovery', () => {
+  it('merges ~/.claude.json and workspace .mcp.json, de-duplicating names', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    await writeFile(
+      join(home, '.claude.json'),
+      JSON.stringify({ mcpServers: { alpha: { command: 'a' }, beta: { url: 'https://x' } } }),
+      'utf8',
+    );
+    await writeFile(
+      join(workspace, '.mcp.json'),
+      JSON.stringify({ mcpServers: { beta: { command: 'b' }, gamma: { type: 'sse', url: 'https://y' } } }),
+      'utf8',
+    );
+
+    const section = await discoverClaudeMcp({ home, workspaceDir: workspace });
+    expect(section.available).toBe(true);
+    expect(section.items).toEqual([
+      { name: 'alpha', transport: 'stdio', source: '~/.claude.json' },
+      { name: 'beta', transport: 'http', source: '~/.claude.json' },
+      { name: 'gamma', transport: 'sse', source: '.mcp.json' },
+    ]);
+  });
+
+  it('reports unavailable when neither claude MCP file exists', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    const section = await discoverClaudeMcp({ home, workspaceDir: workspace });
+    expect(section.available).toBe(false);
+    expect(section.items).toEqual([]);
+  });
+
+  it('lists skill directories from home and workspace', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    await mkdir(join(home, '.claude', 'skills', 'skill-a'), { recursive: true });
+    await mkdir(join(workspace, '.claude', 'skills', 'skill-b'), { recursive: true });
+
+    const section = await discoverClaudeSkills({ home, workspaceDir: workspace });
+    expect(section).toEqual({
+      available: true,
+      items: [
+        { name: 'skill-a', source: '~/.claude/skills' },
+        { name: 'skill-b', source: '.claude/skills' },
+      ],
+    });
+  });
+
+  it('treats "no skill directories" as an available empty result', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    const section = await discoverClaudeSkills({ home, workspaceDir: workspace });
+    expect(section).toEqual({ available: true, items: [] });
   });
 });

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentKind } from '../config/profile-schema';
 import { opencodeConfigDirCandidates, parseJsonc } from '../workspace/codegraph';
@@ -111,4 +111,82 @@ function opencodeTransport(value: unknown): McpTransport {
     return typeof rec.url === 'string' && rec.url.includes('sse') ? 'sse' : 'http';
   }
   return 'unknown';
+}
+
+export interface ClaudeCatalogPaths {
+  home: string;
+  workspaceDir: string;
+}
+
+/** MCP servers from `~/.claude.json` (top-level `mcpServers`) and `<workspace>/.mcp.json`. */
+export async function discoverClaudeMcp(
+  paths: ClaudeCatalogPaths,
+): Promise<CatalogSection<McpServerEntry>> {
+  const sources: Array<[string, string]> = [
+    [join(paths.home, '.claude.json'), '~/.claude.json'],
+    [join(paths.workspaceDir, '.mcp.json'), '.mcp.json'],
+  ];
+  const items: McpServerEntry[] = [];
+  const seen = new Set<string>();
+  let read = 0;
+  for (const [file, label] of sources) {
+    let text: string;
+    try {
+      text = await readFile(file, 'utf8');
+    } catch {
+      continue;
+    }
+    read += 1;
+    let config: unknown;
+    try {
+      config = parseJsonc(text);
+    } catch {
+      continue;
+    }
+    const servers = (config as { mcpServers?: unknown }).mcpServers;
+    if (!servers || typeof servers !== 'object' || Array.isArray(servers)) continue;
+    for (const [name, value] of Object.entries(servers as Record<string, unknown>)) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      items.push({ name, transport: claudeTransport(value), source: label });
+    }
+  }
+  if (read === 0) return { available: false, error: '未找到 ~/.claude.json 或 .mcp.json', items: [] };
+  return { available: true, items };
+}
+
+function claudeTransport(value: unknown): McpTransport {
+  if (!value || typeof value !== 'object') return 'unknown';
+  const rec = value as { type?: unknown; url?: unknown; command?: unknown };
+  if (rec.type === 'sse') return 'sse';
+  if (rec.type === 'http') return 'http';
+  if (typeof rec.url === 'string') return rec.url.includes('sse') ? 'sse' : 'http';
+  if (rec.command !== undefined) return 'stdio';
+  return 'unknown';
+}
+
+/** Skill directory names from `~/.claude/skills` and `<workspace>/.claude/skills`. */
+export async function discoverClaudeSkills(
+  paths: ClaudeCatalogPaths,
+): Promise<CatalogSection<SkillEntry>> {
+  const sources: Array<[string, string]> = [
+    [join(paths.home, '.claude', 'skills'), '~/.claude/skills'],
+    [join(paths.workspaceDir, '.claude', 'skills'), '.claude/skills'],
+  ];
+  const items: SkillEntry[] = [];
+  const seen = new Set<string>();
+  for (const [dir, label] of sources) {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || seen.has(entry.name)) continue;
+      seen.add(entry.name);
+      items.push({ name: entry.name, source: label });
+    }
+  }
+  return { available: true, items };
 }
