@@ -65,6 +65,8 @@ export interface RunPolicyAllow {
   accessMode: AccessMode;
   sandbox: CodexSandboxMode;
   permissionMode: ClaudePermissionMode;
+  /** Profile role (system-prompt soft constraint); omitted when blank. */
+  rolePrompt?: string;
   access: AccessDecision;
   attachments: AgentAttachment[];
   policyFingerprint: string;
@@ -114,6 +116,7 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     accessMode,
     input.profileConfig.permissions,
   );
+  const rolePrompt = input.profileConfig.role?.prompt.trim();
   const resourceDigest = resourceScopeDigest({
     source: input.scope.source,
     chatId: input.scope.chatId,
@@ -135,6 +138,7 @@ export function evaluateRunPolicy(input: RunPolicyInput): RunPolicyResult {
     accessMode,
     sandbox,
     permissionMode,
+    ...(rolePrompt ? { rolePrompt } : {}),
     access: input.access,
     attachments: input.attachments,
     expiresAt: input.now + (input.ttlMs ?? DEFAULT_TTL_MS),

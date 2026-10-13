@@ -156,6 +156,21 @@ describe('run policy', () => {
     expect(source).not.toMatch(/rawClient|LarkChannel|createLarkChannel/);
     expect(source).not.toMatch(/writeFile|mkdir|rm\(/);
   });
+
+  it('carries a trimmed profile role prompt and omits a blank one', () => {
+    const withRole = evaluateRunPolicy(
+      baseInput({
+        profileConfig: { ...profile(), role: { prompt: '  你是财务助手  ' } },
+      }),
+    );
+    expect(withRole).toMatchObject({ ok: true, rolePrompt: '你是财务助手' });
+
+    const blank = evaluateRunPolicy(
+      baseInput({ profileConfig: { ...profile(), role: { prompt: '   ' } } }),
+    );
+    expect(blank.ok).toBe(true);
+    if (blank.ok) expect('rolePrompt' in blank).toBe(false);
+  });
 });
 
 function baseInput(overrides: Partial<RunPolicyInput> = {}): RunPolicyInput {
