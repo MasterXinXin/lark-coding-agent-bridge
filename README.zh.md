@@ -306,6 +306,14 @@ bridge 会检查所选目录存在、是目录，并且不是 `/`、Home 根、�
 - **CodeGraph 代码索引**：检测并可一键安装 codegraph CLI（官方脚本或 npm），接入本机 agent 的 codegraph MCP；建索引需在控制台显式发起（不再随首次 clone 自动执行），已索引项目在 git 拉取确有文件更新时自动增量同步，项目行显示「已索引 / 未索引」。
 - 同一时刻只允许一个添加/拉取任务；任务状态只保存在内存中。关闭服务、停止/重启 profile 或点「取消任务」时，正在跑的 git 拉取 / codegraph 索引会连同子进程一起终止并回滚半成品（未完成的检出目录、半截 `.codegraph/`）。正在运行的作业同时落盘在 `<rootDir>/running-jobs/`：进程被强制结束（`kill -9` / 关窗口 / `taskkill /F`）后，下次启动会据此清理残留子进程并回滚。
 
+### 控制台：角色
+
+profile 详情页的「角色」页用于给该 profile 写一段**角色设定**。它本质是该 profile 的系统提示词软限制：作为 `## 角色设定` 段追加在 bridge 运行约定之后，注入该 profile 的每一次运行（claude 走 `--append-system-prompt-file`、codex 前缀进 stdin、opencode v1 每轮 `system` / v2 前置进文本）。
+
+- 它是提示词层的约束（身份、语气、边界），**不是硬权限**；真正的权限在「配置」页的访问控制里。
+- 在线 profile 保存后**下一轮运行即生效**；离线 profile 保存后**下次启动生效**。
+- 空内容保存即清除角色。
+
 ## 权限模式
 
 推荐给用户配置的是 `permissions.defaultAccess` 和 `permissions.maxAccess`。新 profile 默认两项都是 `full`，以保持 bridge 的本地工具、授权流程、文件写入等能力完整可用。如需收紧权限，可以改成 `workspace` 或 `read-only`；收紧后本地工具执行、登录 / 授权流程、文件写入等能力可能受限。

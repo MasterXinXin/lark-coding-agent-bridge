@@ -306,6 +306,14 @@ The management console (the `http://127.0.0.1:<port>/?token=…` URL the bridge 
 - **CodeGraph index**: detects/installs the codegraph CLI (official script or npm), wires the codegraph MCP for local agents, indexes projects on demand (no automatic index on first clone), and re-syncs an already-indexed project after a pull that changed files. Each project row shows its index state.
 - Only one add/pull task runs at a time. Task state lives in memory only. When the service shuts down, a profile is stopped/restarted, or you click **Cancel task**, the in-flight git pull / codegraph indexing is terminated together with its child processes and half-finished work is rolled back (an incomplete checkout directory, a partial `.codegraph/`). Running jobs are also recorded under `<rootDir>/running-jobs/`, so after a force-kill (`kill -9` / closing the terminal / `taskkill /F`) the next start cleans up leftover children and rolls back.
 
+### Console: role
+
+The profile detail page's **Role** tab lets you write a **role** for that profile. It is a system-prompt soft constraint: appended as a `## 角色设定` section after the bridge run conventions and injected into every run for that profile (claude via `--append-system-prompt-file`, codex as a stdin prefix, opencode v1 as the per-turn `system` / v2 prepended into the text).
+
+- It constrains identity, tone, and boundaries at the prompt layer. It is **not a hard permission** — real permissions live in the **Configuration** tab's access control.
+- An online profile takes effect on the **next run** after saving; an offline profile takes effect on its **next start**.
+- Saving an empty prompt clears the role.
+
 ## Permission modes
 
 The recommended user-facing profile config is `permissions.defaultAccess` and `permissions.maxAccess`. New profiles default to `full` for both values so the bridge can keep local tools, authorization flows, file writes, and other agent features fully usable. To tighten a profile, set one or both values to `workspace` or `read-only`; stricter modes can limit local tool execution, login/authorization flows, file writes, and similar capabilities.
