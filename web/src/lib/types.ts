@@ -60,6 +60,26 @@ export interface ConfigView {
   live?: boolean;
 }
 
+export type PromptInjectionMode =
+  | "append-system-prompt"
+  | "stdin-prefix"
+  | "prompt-body-system";
+
+export type RoleScopeCapability = "control" | "readonly" | "none";
+
+/** Per-profile role (system-prompt soft constraint). */
+export interface RoleView {
+  profile: string;
+  agentKind: AgentKind;
+  prompt: string;
+  /** How this agent injects the role. */
+  injection: PromptInjectionMode;
+  /** Phase 2: how far MCP / skill scope can be controlled. */
+  capabilities: { mcp: RoleScopeCapability; skills: RoleScopeCapability };
+  /** True when this profile's process hosts the UI (edits apply live). */
+  live: boolean;
+}
+
 /** A chat the bot is a member of, for the group picker. */
 export interface KnownChat {
   id: string;
