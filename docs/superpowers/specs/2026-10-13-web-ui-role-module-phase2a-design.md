@@ -96,7 +96,7 @@ export interface RoleCatalogView {
   | codex | readonly | none |
   | opencode | control | control |
 
-  > 迁移 `RoleScopeCapability` / `ROLE_SCOPE` / `capabilityFor` 到本模块；`role-api.ts` 改为从本模块导入。这让「能力分级」与「目录」定义同处一处，也消除一期评审记录的一处重复。
+  > 迁移 `RoleScopeCapability` 与能力分级表（`roleScope`）到本模块；`role-api.ts` 改为从本模块导入。`capabilityFor`（`agentKind` → `AgentCapability`，仅 `buildRoleView` 用来取 `promptInjection`）**保留在 `role-api.ts`**，避免 `role-catalog` 依赖 capability 构造器。
 
 - 入口：
 
