@@ -196,6 +196,11 @@ export interface ProjectsView {
   schedule: PullSchedule;
 }
 
+export interface ProjectBranchesView {
+  branches: string[];
+  current?: string;
+}
+
 export interface RemovedProject {
   id: string;
   dir?: string;

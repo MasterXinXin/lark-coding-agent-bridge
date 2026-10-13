@@ -7,6 +7,7 @@ import type {
   GitAccount,
   JobStatus,
   ProjectView,
+  ProjectBranchesView,
   ProjectsView,
   PullHistoryView,
   PullRecord,
@@ -17,6 +18,13 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -143,11 +151,16 @@ export function WorkspaceView({ profile }: { profile: string }) {
   }
 
   async function setBranch(id: string, branch: string) {
+    setBusy(true);
     try {
-      await apiPost(`/api/projects/branch?${q}`, { id, branch });
-      await load();
+      const { jobId } = await apiPost<StartJobResponse>(`/api/projects/branch?${q}`, { id, branch });
+      localStorage.setItem(activeJobKey, jobId);
+      setJobId(jobId);
+      setJobOpen(true);
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -252,6 +265,7 @@ export function WorkspaceView({ profile }: { profile: string }) {
           {view.projects.map((p) => (
             <ProjectRow
               key={p.id}
+              profile={profile}
               project={p}
               cliInstalled={system?.cli.installed ?? false}
               busy={busy || jobRunning}
@@ -311,6 +325,7 @@ function codegraphBadge(p: ProjectView, cliInstalled: boolean) {
 }
 
 function ProjectRow({
+  profile,
   project,
   cliInstalled,
   busy,
@@ -319,6 +334,7 @@ function ProjectRow({
   onBranch,
   onCodegraph,
 }: {
+  profile: string;
   project: ProjectView;
   cliInstalled: boolean;
   busy: boolean;
@@ -328,9 +344,28 @@ function ProjectRow({
   onCodegraph: (id: string, action: "init" | "sync") => void;
 }) {
   const [branch, setBranch] = useState(project.branch);
+  const [options, setOptions] = useState<string[] | null>(null);
+  const [loadingBranches, setLoadingBranches] = useState(false);
   useEffect(() => {
     setBranch(project.branch);
   }, [project.branch]);
+
+  const loadBranches = useCallback(() => {
+    setLoadingBranches(true);
+    apiGet<ProjectBranchesView>(
+      `/api/projects/branches?profile=${encodeURIComponent(profile)}&id=${encodeURIComponent(project.id)}`,
+    )
+      .then((v) => setOptions(v.branches))
+      .catch(() => setOptions(null))
+      .finally(() => setLoadingBranches(false));
+  }, [profile, project.id]);
+  useEffect(() => {
+    loadBranches();
+  }, [loadBranches]);
+
+  const selected = branch.trim() || project.branch;
+  const merged = options ? Array.from(new Set([selected, ...options])) : null;
+
   return (
     <div className="flex items-center gap-3 rounded-md border px-3 py-2">
       <div className="min-w-0 flex-1">
@@ -348,14 +383,45 @@ function ProjectRow({
           )}
         </div>
       </div>
-      <Input
-        className="h-8 w-[130px]"
-        value={branch}
-        onChange={(e) => setBranch(e.target.value)}
-        onBlur={() => {
-          if (branch.trim() && branch !== project.branch) onBranch(project.id, branch.trim());
-        }}
-      />
+      {merged ? (
+        <div className="flex items-center gap-1">
+          <Select
+            value={selected}
+            disabled={busy || loadingBranches}
+            onValueChange={(v) => {
+              if (v !== project.branch) onBranch(project.id, v);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[160px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {merged.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy || loadingBranches}
+            onClick={loadBranches}
+          >
+            刷新分支
+          </Button>
+        </div>
+      ) : (
+        <Input
+          className="h-8 w-[130px]"
+          value={branch}
+          onChange={(e) => setBranch(e.target.value)}
+          onBlur={() => {
+            if (branch.trim() && branch !== project.branch) onBranch(project.id, branch.trim());
+          }}
+        />
+      )}
       {cliInstalled && (
         <Button
           variant="outline"
