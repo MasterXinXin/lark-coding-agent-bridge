@@ -724,7 +724,7 @@ export async function buildRoleCatalog(
   try {
     const home = opts.home ?? homedir();
     const appPaths = profileAppPaths(state);
-    const workspaceDir = state.profileConfig.workspaces.default ?? appPaths.defaultWorkspaceDir;
+    const workspaceDir = state.profileConfig.workspaces?.default ?? appPaths.defaultWorkspaceDir;
     const codexHome = state.profileConfig.codex?.codexHome ?? join(appPaths.profileDir, 'codex-home');
 
     let mcp: CatalogSection<McpServerEntry>;
