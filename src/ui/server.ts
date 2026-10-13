@@ -50,6 +50,7 @@ import {
   getSchedule,
   setWorkspaceDir,
 } from './workspace-api';
+import { buildRoleView, saveRoleConfig } from './role-api';
 import { browseDirectory } from '../workspace/dir-browse';
 import {
   jobRegistry,
@@ -260,6 +261,17 @@ async function route(
   if (path === '/api/access' && p) {
     const { state } = await resolveTargetState(deps, url);
     sendJson(res, 200, await mutateAccess(state, await readJsonBody(req)));
+    return;
+  }
+  // --- role (system-prompt soft constraint) ---
+  if (path === '/api/role' && g) {
+    const { state, live } = await resolveTargetState(deps, url);
+    sendJson(res, 200, buildRoleView(state, live));
+    return;
+  }
+  if (path === '/api/role' && p) {
+    const { state, live } = await resolveTargetState(deps, url);
+    sendJson(res, 200, await saveRoleConfig(state, await readJsonBody(req), live));
     return;
   }
   if (path === '/api/chats' && g) {

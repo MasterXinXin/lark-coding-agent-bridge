@@ -243,4 +243,36 @@ describe('ui server (supervisor-backed)', () => {
     const res = await get('/api/profiles/qr/status?sessionId=nope', handle.token);
     expect(res.status).toBe(404);
   });
+
+  it('reads and saves the profile role (live, online profile)', async () => {
+    const view = await json(await get('/api/role', handle.token));
+    expect(view).toMatchObject({ profile: 'claude', live: true, prompt: '' });
+    expect(view.injection).toBe('append-system-prompt');
+
+    const saved = await json(await post('/api/role', handle.token, { prompt: '  你是财务助手  ' }));
+    expect(saved.prompt).toBe('你是财务助手');
+    // live: the in-memory Controls got the new role
+    expect(online.get('claude').profileConfig.role.prompt).toBe('你是财务助手');
+
+    const reread = await json(await get('/api/role', handle.token));
+    expect(reread.prompt).toBe('你是财务助手');
+  });
+
+  it('saves the role for an offline profile to disk only', async () => {
+    const saved = await json(
+      await post('/api/role?profile=work', handle.token, { prompt: '你是运维助手' }),
+    );
+    expect(saved).toMatchObject({ profile: 'work', live: false, prompt: '你是运维助手' });
+
+    const reread = await json(await get('/api/role?profile=work', handle.token));
+    expect(reread.prompt).toBe('你是运维助手');
+
+    const disk = (await loadRootConfig(configPath))!;
+    expect(disk.profiles.work!.role?.prompt).toBe('你是运维助手');
+  });
+
+  it('400s a non-string role prompt', async () => {
+    const res = await post('/api/role', handle.token, { prompt: 42 });
+    expect(res.status).toBe(400);
+  });
 });
