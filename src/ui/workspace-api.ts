@@ -8,8 +8,11 @@ import { GitAccountStore, hostStorePaths } from '../git/accounts';
 import { gitEnvForAccount, withGitEnv } from '../git/auth';
 import {
   createGitRunner,
+  currentBranch,
   ensureCheckout,
   isGitRepo,
+  listLocalBranches,
+  listRemoteBranches,
   repoStatus,
   pullRepo,
   type GitRunner,
@@ -129,6 +132,56 @@ export function resolveProjectDir(workspaceDir: string, localPath: string): stri
     throw new HttpError(400, `项目目录必须位于工作空间内：${localPath}`);
   }
   return abs;
+}
+
+export interface ProjectBranchesView {
+  branches: string[];
+  current?: string;
+}
+
+/**
+ * List a project's branches from the repo itself (remote heads ∪ local
+ * branches), without requiring an account/provider. The checked-out branch
+ * (or the configured one when not checked out) is listed first.
+ */
+export async function projectBranchesView(
+  profile: string,
+  rootDir: string | undefined,
+  id: string,
+  runner: GitRunner = run,
+): Promise<ProjectBranchesView> {
+  const { workspaceDir, store } = await statePaths(profile, rootDir);
+  const entry = store.get(id);
+  if (!entry) throw new HttpError(404, `项目不存在：${id}`);
+  const dir = resolveProjectDir(workspaceDir, entry.localPath);
+  const usernames = await accountUsernames(rootDir);
+  const env = entry.accountId
+    ? await gitEnvForAccount(entry.accountId, hostStorePaths(rootDir), usernames.get(entry.accountId))
+    : undefined;
+
+  let remote: string[];
+  try {
+    remote = await listRemoteBranches(runner, entry.repoUrl, {
+      cwd: workspaceDir,
+      ...(env ? { env } : {}),
+    });
+  } catch (err) {
+    throw new HttpError(400, err instanceof Error ? err.message : String(err));
+  }
+
+  const exists = await isGitRepo(runner, dir).catch(() => false);
+  const local = exists ? await listLocalBranches(runner, dir) : [];
+  const current =
+    (exists ? await currentBranch(runner, dir) : undefined) ?? (entry.branch || undefined);
+
+  const set = new Set<string>();
+  for (const name of [...remote, ...local, current, entry.branch]) {
+    if (name) set.add(name);
+  }
+  const branches = [...set].sort((a, b) =>
+    a === current ? -1 : b === current ? 1 : a.localeCompare(b),
+  );
+  return { branches, ...(current ? { current } : {}) };
 }
 
 export async function projectsView(profile: string, rootDir?: string): Promise<ProjectsView> {
