@@ -109,6 +109,24 @@ export interface MeetingConfig {
   summaryTarget: MeetingSummaryTarget;
 }
 
+/**
+ * The profile's role — a system-prompt soft constraint injected into every
+ * agent run (see `composeSystemPrompt`). Not a hard permission. The whitelist
+ * fields are phase 2 (MCP / skill scope); missing = follow native config,
+ * an explicit empty array = disable everything.
+ */
+export interface RoleConfig {
+  /** Role system prompt (soft constraint). Empty after trim = not injected. */
+  prompt: string;
+  /** Phase 2: MCP servers allowed for this profile. Missing = follow native config. */
+  mcpEnabled?: string[];
+  /** Phase 2: skills allowed for this profile. Missing = follow native config. */
+  skillsEnabled?: string[];
+}
+
+/** Upper bound for the role prompt, enforced on save. */
+export const ROLE_PROMPT_MAX_BYTES = 64 * 1024;
+
 export type LarkCliIdentityPreset = 'bot-only' | 'user-default';
 
 /**
@@ -165,6 +183,8 @@ export interface ProfileConfig {
   comments: CommentConfig;
   /** In-meeting agent settings. See {@link MeetingConfig}. */
   meeting: MeetingConfig;
+  /** Role (system-prompt soft constraint) injected into every run. */
+  role?: RoleConfig;
   larkCli: LarkCliConfig;
 }
 
@@ -244,6 +264,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     attachments?: Partial<AttachmentConfig>;
     comments?: unknown;
     meeting?: unknown;
+    role?: unknown;
     larkCli?: unknown;
   };
 
@@ -276,6 +297,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
   const workspaces = normalizeWorkspaces(raw.workspaces);
   const comments = normalizeComments(raw.comments);
   const meeting = normalizeMeeting(raw.meeting);
+  const role = normalizeRole(raw.role);
   const larkCli = normalizeLarkCli(raw.larkCli);
 
   return {
@@ -302,6 +324,7 @@ export function normalizeProfileConfig(input: unknown): ProfileConfig {
     },
     comments,
     meeting,
+    ...(role ? { role } : {}),
     larkCli,
   };
 }
@@ -459,6 +482,39 @@ function normalizeMeeting(input: unknown): MeetingConfig {
         ? raw.summaryTarget
         : MEETING_DEFAULTS.summaryTarget,
   };
+}
+
+/**
+ * Normalize a role. Returns `undefined` when there is nothing to store
+ * (empty prompt and no whitelists) so the config stays clean.
+ */
+export function normalizeRole(input: unknown): RoleConfig | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const raw = input as { prompt?: unknown; mcpEnabled?: unknown; skillsEnabled?: unknown };
+  const prompt = typeof raw.prompt === 'string' ? raw.prompt.trim() : '';
+  const mcpEnabled = normalizeNameList(raw.mcpEnabled);
+  const skillsEnabled = normalizeNameList(raw.skillsEnabled);
+  if (!prompt && !mcpEnabled && !skillsEnabled) return undefined;
+  return {
+    prompt,
+    ...(mcpEnabled ? { mcpEnabled } : {}),
+    ...(skillsEnabled ? { skillsEnabled } : {}),
+  };
+}
+
+/** `undefined` = field absent (follow native). Array (possibly empty) = explicit whitelist. */
+function normalizeNameList(input: unknown): string[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of input) {
+    if (typeof item !== 'string') continue;
+    const name = item.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
 }
 
 /** Like {@link numberOr} but keeps 0 and bounds the result. */
