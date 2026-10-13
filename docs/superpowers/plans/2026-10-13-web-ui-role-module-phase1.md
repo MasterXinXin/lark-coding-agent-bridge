@@ -875,7 +875,7 @@ export function buildRoleView(state: MutableProfileState, live: boolean): RoleVi
  * Persist the profile's role (under the config file lock) and refresh the
  * in-memory state. `Controls` structurally satisfies `MutableProfileState`, so
  * an online profile picks the change up on its next run without a restart.
- * Phase 1 writes only `prompt`; phase 2 extends the parsed body with whitelists.
+ * Writes `prompt`; any existing phase-2 whitelist fields are preserved.
  */
 export async function saveRoleConfig(
   state: MutableProfileState,
@@ -890,7 +890,19 @@ export async function saveRoleConfig(
       const profile = root.profiles[state.profile];
       if (!profile) throw new HttpError(404, `profile not found: ${state.profile}`);
       const next = { ...profile };
-      if (role) next.role = role;
+      const existing = profile.role;
+      const preserved = existing
+        ? {
+            ...(existing.mcpEnabled ? { mcpEnabled: existing.mcpEnabled } : {}),
+            ...(existing.skillsEnabled ? { skillsEnabled: existing.skillsEnabled } : {}),
+          }
+        : {};
+      const merged: RoleConfig | undefined = role
+        ? { ...preserved, prompt: role.prompt }
+        : Object.keys(preserved).length > 0
+          ? { prompt: '', ...preserved }
+          : undefined;
+      if (merged) next.role = merged;
       else delete next.role;
       root.profiles[state.profile] = next;
       await saveRootConfig(root, state.configPath);
@@ -904,7 +916,7 @@ export async function saveRoleConfig(
   return buildRoleView(state, live);
 }
 
-/** Parse `{ prompt }`; blank prompt means "remove the role". */
+/** Parse `{ prompt }`; a blank prompt clears the role text. */
 function parseRoleBody(body: unknown): RoleConfig | undefined {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new HttpError(400, 'expected a JSON object body');
@@ -1292,5 +1304,5 @@ Expected: no tracked files changed (`pnpm build` writes only gitignored output u
 - **One composition point.** All three adapters use `composeSystemPrompt`; do not inline role concatenation per adapter. `prefixBridgeSystemPrompt` keeps its 2-arg signature working via the optional third parameter.
 - **`rolePrompt` is intentionally optional** end-to-end. An empty/blank role must produce a result with no `rolePrompt` key, so downstream `toMatchObject`/fingerprint behavior is unchanged.
 - **Live-vs-disk** matches `savePreferencesConfig`: online profiles are `Controls` objects (which structurally satisfy `MutableProfileState`) and are refreshed in place; offline profiles only touch disk and take effect on the next start.
-- **Phase-1 boundary:** `saveRoleConfig` writes only `prompt` and, on a blank prompt, deletes the whole `role` field. Phase 2 will extend `parseRoleBody` with `mcpEnabled` / `skillsEnabled` and preserve them across a blank-prompt save (compute `prompt` and whitelists together). `RoleView.capabilities` is already emitted so phase 2 is additive.
+- **Phase-1 boundary:** `saveRoleConfig` writes `prompt` and preserves any existing `mcpEnabled` / `skillsEnabled` whitelists (a blank prompt clears the role text but keeps whitelists; the whole `role` is deleted only when nothing remains). Phase 1's UI never sets the whitelists; phase 2 adds the catalog + UI and extends `parseRoleBody` to accept them. `RoleView.capabilities` is already emitted so phase 2 is additive.
 - **`pnpm test` (whole suite) has known environment/load flakiness on this machine** (missing `sh`, timeouts under load); the focused suites above plus `pnpm typecheck && pnpm build` are the gate.
