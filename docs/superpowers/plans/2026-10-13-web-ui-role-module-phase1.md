@@ -922,10 +922,10 @@ function parseRoleBody(body: unknown): RoleConfig | undefined {
     throw new HttpError(400, 'expected a JSON object body');
   }
   const raw = body as { prompt?: unknown };
-  if (raw.prompt !== undefined && typeof raw.prompt !== 'string') {
+  if (typeof raw.prompt !== 'string') {
     throw new HttpError(400, 'prompt must be a string');
   }
-  const prompt = truncateUtf8((raw.prompt ?? '').trim(), ROLE_PROMPT_MAX_BYTES);
+  const prompt = truncateUtf8(raw.prompt.trim(), ROLE_PROMPT_MAX_BYTES);
   return prompt ? { prompt } : undefined;
 }
 ```
