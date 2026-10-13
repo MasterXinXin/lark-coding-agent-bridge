@@ -1,3 +1,4 @@
+import type { Dirent } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentKind } from '../config/profile-schema';
@@ -129,6 +130,7 @@ export async function discoverClaudeMcp(
   const items: McpServerEntry[] = [];
   const seen = new Set<string>();
   let read = 0;
+  let parsed = 0;
   for (const [file, label] of sources) {
     let text: string;
     try {
@@ -143,6 +145,7 @@ export async function discoverClaudeMcp(
     } catch {
       continue;
     }
+    parsed += 1;
     const servers = (config as { mcpServers?: unknown }).mcpServers;
     if (!servers || typeof servers !== 'object' || Array.isArray(servers)) continue;
     for (const [name, value] of Object.entries(servers as Record<string, unknown>)) {
@@ -152,6 +155,7 @@ export async function discoverClaudeMcp(
     }
   }
   if (read === 0) return { available: false, error: '未找到 ~/.claude.json 或 .mcp.json', items: [] };
+  if (parsed === 0) return { available: false, error: 'claude 配置解析失败', items: [] };
   return { available: true, items };
 }
 
@@ -176,7 +180,7 @@ export async function discoverClaudeSkills(
   const items: SkillEntry[] = [];
   const seen = new Set<string>();
   for (const [dir, label] of sources) {
-    let entries;
+    let entries: Dirent[];
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {

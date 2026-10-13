@@ -144,4 +144,32 @@ describe('claude MCP + skill discovery', () => {
     const section = await discoverClaudeSkills({ home, workspaceDir: workspace });
     expect(section).toEqual({ available: true, items: [] });
   });
+
+  it('reports unavailable when the only claude config is unparseable', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    await writeFile(join(home, '.claude.json'), '{ not json', 'utf8');
+    const section = await discoverClaudeMcp({ home, workspaceDir: workspace });
+    expect(section.available).toBe(false);
+    expect(section.items).toEqual([]);
+    expect(section.error).toBeTruthy();
+  });
+
+  it('de-duplicates skills by name, first source wins', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    await mkdir(join(home, '.claude', 'skills', 'shared'), { recursive: true });
+    await mkdir(join(workspace, '.claude', 'skills', 'shared'), { recursive: true });
+    const section = await discoverClaudeSkills({ home, workspaceDir: workspace });
+    expect(section.items).toEqual([{ name: 'shared', source: '~/.claude/skills' }]);
+  });
+
+  it('ignores plain files inside a skills directory', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    await mkdir(join(home, '.claude', 'skills', 'real'), { recursive: true });
+    await writeFile(join(home, '.claude', 'skills', 'README.md'), 'x', 'utf8');
+    const section = await discoverClaudeSkills({ home, workspaceDir: workspace });
+    expect(section.items).toEqual([{ name: 'real', source: '~/.claude/skills' }]);
+  });
 });
