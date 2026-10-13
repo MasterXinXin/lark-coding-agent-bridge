@@ -286,4 +286,22 @@ describe('ui server (supervisor-backed)', () => {
     expect(saved.prompt).toBe('');
     expect(online.get('claude').profileConfig.role).toBeUndefined();
   });
+
+  it('returns the role catalog shape for the active profile', async () => {
+    const res = await get('/api/role/catalog', handle.token);
+    expect(res.status).toBe(200);
+    const catalog = await json(res);
+    expect(catalog).toMatchObject({
+      profile: 'claude',
+      agentKind: 'claude',
+      capabilities: { mcp: 'control', skills: 'readonly' },
+    });
+    expect(catalog.mcp).toHaveProperty('available');
+    expect(Array.isArray(catalog.mcp.items)).toBe(true);
+    expect(catalog.skills).toHaveProperty('available');
+  });
+
+  it('404s the catalog for an unknown profile', async () => {
+    expect((await get('/api/role/catalog?profile=ghost', handle.token)).status).toBe(404);
+  });
 });

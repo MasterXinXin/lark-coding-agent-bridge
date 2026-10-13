@@ -51,6 +51,7 @@ import {
   setWorkspaceDir,
 } from './workspace-api';
 import { buildRoleView, saveRoleConfig } from './role-api';
+import { buildRoleCatalog } from '../agent/role-catalog';
 import { browseDirectory } from '../workspace/dir-browse';
 import {
   jobRegistry,
@@ -272,6 +273,12 @@ async function route(
   if (path === '/api/role' && p) {
     const { state, live } = await resolveTargetState(deps, url);
     sendJson(res, 200, await saveRoleConfig(state, await readJsonBody(req), live));
+    return;
+  }
+  // --- role catalog (MCP / skill discovery, read-only) ---
+  if (path === '/api/role/catalog' && g) {
+    const { state } = await resolveTargetState(deps, url);
+    sendJson(res, 200, await buildRoleCatalog(state));
     return;
   }
   if (path === '/api/chats' && g) {
