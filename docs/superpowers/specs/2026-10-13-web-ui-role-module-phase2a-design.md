@@ -155,7 +155,19 @@ function parseMcpServerNames(toml: string): string[];
   skillsEnabled?: string[];
   ```
 - `buildRoleView` 填充上述字段（有则带，无则省略）。
-- `saveRoleConfig` 的 `parseRoleBody` 扩展：`prompt` 仍必须 string；`mcpEnabled` / `skillsEnabled` 若提供必须是 `string[]`（否则 400），逐项 trim、去空、去重后写入；未提供则保持既有字段（沿用一期「保守合并」逻辑：非空 prompt 更新 prompt，空 prompt 清 prompt，白名单独立保留/更新；三者皆空则删除整个 `role`）。
+- `saveRoleConfig` 的 `parseRoleBody` 扩展：`prompt` 仍必须 string；`mcpEnabled` / `skillsEnabled` 采用**三态**：
+
+  | body 取值 | 语义 |
+  | --- | --- |
+  | 省略（`undefined`） | 保持既有选择不变 |
+  | `null` | 清除该白名单 = 不限制 |
+  | `[]` | 显式全部禁用 |
+  | `string[]` | 显式允许集合（保存时 trim、去空、去重） |
+  | 其它（数字/对象/含非字符串项） | 400 |
+
+  合并后交由 `normalizeRole`（`src/config/profile-schema.ts`）统一归一化：非空 prompt 更新 prompt，空 prompt 清 prompt，白名单按上面三态独立保留/更新/清除；三者皆无则删除整个 `role`。
+
+  > 之所以需要 `null` 这一态：若「不限制」只由**省略**表达，用户把已有显式白名单改回「全选/不限制」时，省略会被后端理解为「保持原值」，无法表达清除。三态消除了这个歧义。
 
 ### 5.5 路由（`src/ui/server.ts`）
 
@@ -173,8 +185,12 @@ function parseMcpServerNames(toml: string): string[];
   - 顶部显著说明：**「当前仅保存选择，尚未强制生效（2b 落地）」**。
   - MCP 段：逐项 `Switch`（复用 `web/src/components/ui/switch.tsx`）。`capabilities.mcp === 'readonly'` → 展示但禁用；`'none'` → 不渲染该段。`mcp.available === false` → 显示错误 + 「重试」。
   - Skill 段同理，按 `capabilities.skills` 处理。
-  - 选择语义：初始全选=不限制（不发送字段）；用户取消勾选 → 发送被勾选数组；全部取消 → 发送 `[]`。为降低误操作，UI 以「显式勾选集」为真实状态，并在「当前=全选」时等价于不限制（省略字段）。
-  - 保存沿用 `POST /api/role`，body = `{ prompt, ...(mcpEnabled ? { mcpEnabled } : {}), ...(skillsEnabled ? { skillsEnabled } : {}) }`。
+  - 选择语义（真实状态为「显式勾选集」`chosen`）：
+    - `chosen.size === 全部可选数` → 发送 `null`（不限制）；
+    - `chosen.size === 0` → 发送 `[]`（全部禁用）；
+    - 其它 → 发送勾选数组。
+    - 目录 `available === false` 或能力非 `control` → **不发送**该字段（保持后端既有值）。
+  - 保存沿用 `POST /api/role`，body = `{ prompt, ...(mcpEnabled !== undefined ? { mcpEnabled } : {}), ...(skillsEnabled !== undefined ? { skillsEnabled } : {}) }`（`null` 表示清除）。
 
 ## 7. 错误处理
 
@@ -183,7 +199,7 @@ function parseMcpServerNames(toml: string): string[];
 | 任一目录来源读/解析失败 | 该 section `available:false` + `error`，HTTP 仍 200 |
 | profile 不存在 | `resolveTargetState` → 404 |
 | 无任何 MCP / skill | `available:true, items:[]`（合法结果） |
-| `mcpEnabled` / `skillsEnabled` 非 `string[]` | 400「mcpEnabled must be a string array」 |
+| `mcpEnabled` / `skillsEnabled` 既非 `string[]` 也非 `null`（缺省除外） | 400「mcpEnabled must be a string array」 |
 | 磁盘写失败 | 500「保存失败：…」，in-memory 不更新（沿用一期） |
 
 ## 8. 测试计划
