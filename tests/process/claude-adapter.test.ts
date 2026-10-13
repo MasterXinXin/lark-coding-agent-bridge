@@ -210,6 +210,25 @@ describe('ClaudeAdapter process contract', () => {
       new ClaudeAdapter({ binary: 'unused' }).run({ runId: 'run-no-cwd', prompt: 'hi' }),
     ).toThrow(/cwd is required/);
   });
+
+  it('appends the profile role to the system prompt file', async () => {
+    const fake = await createFakeClaude({
+      lines: [{ type: 'result', session_id: 'sess-role' }],
+    });
+    cleanup.push(fake.dir);
+
+    const run = new ClaudeAdapter({ binary: fake.path }).run({
+      runId: 'run-role',
+      prompt: 'hi',
+      cwd: fake.dir,
+      rolePrompt: '你是财务助手',
+    });
+
+    await collect(run.events);
+    const record = await readRecord(fake.recordPath);
+    expect(record.systemPrompt).toContain('## 角色设定');
+    expect(record.systemPrompt).toContain('你是财务助手');
+  });
 });
 
 async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {

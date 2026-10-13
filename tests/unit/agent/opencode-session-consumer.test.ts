@@ -31,7 +31,7 @@ class FakeStream extends EventEmitter {
 
 interface FakeClientCalls {
   createSession: Array<{ title?: string; directory?: string }>;
-  promptAsync: Array<{ sessionId: string; prompt: string }>;
+  promptAsync: Array<{ sessionId: string; prompt: string; system?: string }>;
   abortSession: string[];
   replyPermission: Array<{ requestId: string; reply: string; directory?: string }>;
 }
@@ -59,6 +59,7 @@ function makeFakeClient(nextSessionId = 'ses_test'): { client: FakeClient; calls
       calls.promptAsync.push({
         sessionId: opts.sessionId,
         prompt: opts.parts.map((p) => p.text).join(''),
+        system: opts.system,
       });
     },
     async abortSession(id) {
@@ -736,5 +737,25 @@ describe('OpencodeSessionConsumer — multi-turn behavior', () => {
     await turn2.stop();
     await drain(turn2.events);
     expect(calls.abortSession).toEqual(['ses_twin', 'ses_twin']);
+  });
+
+  it('injects the profile role into the per-turn system field', async () => {
+    const stream = new FakeStream();
+    const { client, calls } = makeFakeClient('ses_role');
+    const consumer = makeConsumer(stream, client);
+
+    const turn = consumer.dispatchTurn({
+      runId: 'r1',
+      prompt: 'hi',
+      cwd: '/repo',
+      rolePrompt: '你是财务助手',
+    });
+    await waitForSession(consumer);
+    stream.push({ kind: 'connected' });
+    stream.push({ kind: 'status', sessionID: 'ses_role', status: 'idle' });
+    await drain(turn.events);
+
+    expect(calls.promptAsync[0]?.system).toContain('## 角色设定');
+    expect(calls.promptAsync[0]?.system).toContain('你是财务助手');
   });
 });

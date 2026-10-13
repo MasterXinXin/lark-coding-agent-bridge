@@ -153,7 +153,10 @@ export class CodexAdapter implements AgentAdapter {
     child.stdin.on('error', (err) => {
       log.warn('agent', 'stdin-error', { message: err.message });
     });
-    child.stdin.end(prefixBridgeSystemPrompt(opts.prompt, this.botIdentity), 'utf8');
+    child.stdin.end(
+      prefixBridgeSystemPrompt(opts.prompt, this.botIdentity, opts.rolePrompt),
+      'utf8',
+    );
 
     const stopGraceMs = opts.stopGraceMs ?? this.defaultStopGraceMs;
 

@@ -416,6 +416,28 @@ describe('CodexAdapter process contract', () => {
       }),
     ).toThrow(/cwd is required/);
   });
+
+  it('prefixes the profile role into the stdin system prompt', async () => {
+    const fake = await createFakeCodex({ lines: [{ type: 'turn.completed' }] });
+    cleanup.push(fake.dir);
+    const cwd = await realpath(fake.dir);
+
+    const run = new CodexAdapter({
+      binary: fake.path,
+      profileStateDir: fake.dir,
+      sandbox: 'read-only',
+    }).run({
+      runId: 'run-role',
+      prompt: 'hello',
+      cwd,
+      rolePrompt: '你是财务助手',
+    });
+
+    await collect(run.events);
+    const record = await readRecord(fake.recordPath);
+    expect(record.stdin).toContain('## 角色设定');
+    expect(record.stdin).toContain('你是财务助手');
+  });
 });
 
 async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {

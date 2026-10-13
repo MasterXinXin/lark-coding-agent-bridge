@@ -1,5 +1,5 @@
 import { log } from '../../core/logger';
-import { buildBridgeSystemPrompt } from '../bridge-system-prompt';
+import { composeSystemPrompt } from '../bridge-system-prompt';
 import type {
   AgentBotIdentity,
   AgentEvent,
@@ -294,7 +294,7 @@ export class OpencodeSessionConsumer {
       // Now safe to start the stream — the translator will see sessionId on
       // the first `connected` event it processes.
       await this.startStreamOnce();
-      const bridgeSystemPrompt = buildBridgeSystemPrompt(this.deps.botIdentity);
+      const bridgeSystemPrompt = composeSystemPrompt(this.deps.botIdentity, opts.rolePrompt);
       await this.deps.client.promptAsync({
         sessionId: this.sessionId,
         parts: [{ type: 'text', text: opts.prompt }],
