@@ -22,8 +22,8 @@
 | `agents` 附件可内联 system | ❌ `Prompt.AgentAttachment` 只有 `{ name, mention? }`，**按名字引用**已配置 agent | OpenAPI schema |
 | v2 配置里 MCP 的形状 | **`mcp.servers.<name>`**（`type: local/remote`、`disabled`）；v2 **不再**把 server 名直接挂在 `mcp` 下 | 官方 mcp-servers 文档 “Config” |
 | v1 配置里 MCP 的形状 | `mcp.<name>`（`enabled` 布尔）—— **2a 代码注释把两者标反了**（见 §2.4） | v1 文档 / migrate-v1 |
-| v2 MCP 工具名 / 权限动作 | 工具名 = `<server>_<tool>`（非字母数字归一为 `_`）；权限动作就是 `<server>_<tool>`，`effect: deny` 可**隐藏工具但不断开 server** | mcp-servers “Permissions”、permissions “Actions” |
-| v2 skill 的屏蔽手段 | 权限 `{ action: 'skill', resource: '<skill-id>', effect: 'deny' }`（`deny` = 从模型可见列表隐藏并拒绝加载） | skills “Permissions” |
+| v2 MCP 工具名 / 权限动作 | 动作 = `<server>_<tool>`，**两端各自把 `[^A-Za-z0-9_-]` 归一为 `_`（连字符保留）**；`effect: deny` 可**隐藏工具但不断开 server**。已从 opencode 打包源码的 `McpTool` id 构建器核实（`name.replace(/[^a-zA-Z0-9_-]/g, "_")`）。 | mcp-servers “Permissions”、permissions “Actions”、`opencode-cli.exe` 反查 |
+| v2 skill 的屏蔽手段 | 权限 `{ action: 'skill', resource: '<skill-id>', effect: 'deny' }`（`deny` = 从模型可见列表隐藏并拒绝加载）。**已核实 `skill-id` = 目录名/文件名**（frontmatter 的 `name` 只是展示名）→ 我们按目录名 deny 是正确目标。 | skills “Permissions”、`opencode-cli.exe` 反查 |
 | v2 有运行时 MCP / agent / skill API | ✅ SDK 暴露：`mcp.{list,add,remove,connect,disconnect,catalog}`、`agent.{list,get,switchAgent}`、`skill.list`、`session.skill` | `@opencode/client` 2.0.26 `client.d.ts` |
 | `OPENCODE_CONFIG`（单文件）是否仍生效 | ✅ **本机 v2.0.18 实证生效**（v2 文档页未列，但私有 `opencode serve` 的 `/api/config` 把该文件列为配置源并合并其 `mcp`） | 本地 spawn serve + `GET /api/config` |
 | `OPENCODE_CONFIG_DIR` | 会**整体替换全局配置目录**（丢掉用户全局 `opencode.json`/agents/skills），不适合做增量注入 | 源码 `global.ts` + 文档 |
@@ -137,7 +137,8 @@ export function buildOpencodeV1RoleConfig(input: { ... }): OpencodeRoleInjection
 
 落地：
 
-- `OpencodeAdapter.prepareRun(opts)` 里（`server.start()` 之前）用 `buildOpencodeV1/V2RoleConfig` 生成配置；非空则写入 `<profileDir>/opencode-role.json`，并把 `OPENCODE_CONFIG` 传进 `OpencodeServer` 的 spawn env。
+- `OpencodeAdapter.prepareRun(opts)` 里（`server.start()` 之前）用 `buildOpencodeV1/V2RoleConfig` 生成配置；非空则写入 OS 临时目录（`<tmp>/lark-bridge-opencode/role-<adapterId>.json`，每 adapter 一个稳定文件名——重启覆盖而非泄漏），并把 `OPENCODE_CONFIG` 传进 `OpencodeServer` 的 spawn env。
+- v2 的 MCP deny 动作名需与 opencode 一致地归一：`serverName.replace(/[^a-zA-Z0-9_-]/g, '_')` 再拼 `_*`（否则 `my.server` 之类的 server 永远匹配不上；`-` 保留，常见名不受影响）。
 - `OpencodeServer`（`src/agent/opencode/server.ts`）：`ServeOptions` 增 `extraEnv?: Record<string,string>`，spawn 时与既有 `OPENCODE_SERVER_PASSWORD` 合并。**注意**：v1 复用外部 serve 的分支无法注入；复用即视为「无强制」（与 2a §1 一致）。
 - **生效时机**：`OPENCODE_CONFIG` 在 serve **启动时**读取。因此：
   - 首次 `prepareRun` → 生成并注入，此后该 profile 的所有 run 生效。
@@ -147,7 +148,7 @@ export function buildOpencodeV1RoleConfig(input: { ... }): OpencodeRoleInjection
 ### 5.3 claude：`--mcp-config` + `--strict-mcp-config`
 
 - claude 需要**完整 server 定义**（`--strict-mcp-config` 会忽略其它所有 MCP 配置），因此发现层要能给出定义，而不只是名字/transport。
-- 扩展 `src/agent/role-catalog.ts`：`discoverClaudeMcp` 增一个返回 `Map<name, rawDef>` 的旁路（或让 `McpServerEntry` 增可选 `raw?: unknown`，仅内存用、不进 API 响应）。
+- 新增 `src/agent/claude/role-mcp.ts`：`readClaudeMcpDefinitions({ home, workspaceDir })`（同步读 `~/.claude.json` 顶层 `mcpServers` + `<workspace>/.mcp.json`，首个定义胜出，与 `discoverClaudeMcp` 去重顺序一致）+ `buildClaudeMcpConfig({ mcpEnabled, definitions })`（纯函数）。`ClaudeAdapterOptions` 增可注入的 `roleMcpDefinitions?`（默认走真实读取，便于测试）。
 - 每次 run（`ClaudeAdapter.run`）：
   - `mcpEnabled` 缺失 → 不加任何 flag（跟随原生）。
   - 否则写临时 `mcp-config.json` = `{ "mcpServers": <过滤后的定义> }`，argv 追加 `--mcp-config <path> --strict-mcp-config`；onExit 清理（复用 `writeSystemPromptFile` 的临时目录模式）。
@@ -199,15 +200,22 @@ export function buildOpencodeV1RoleConfig(input: { ... }): OpencodeRoleInjection
 5. 零新依赖；相关 vitest、`pnpm typecheck`、`pnpm build`、前端 tsc 全绿。
 6. 不写入用户 agent 配置目录本体。
 
-## 9. 待验证（实施前/实施中 spike）
+## 9. 待验证 / 已实测（spike）
 
-1. **`OPENCODE_CONFIG` 与 project 配置的优先级**：本机只在「global + 该文件」下验证过（文件被合并）。需确认项目级 `opencode.json` 不会覆盖我们的 `permissions` deny（文档称权限规则是**追加 + 后者胜**，但优先级顺序需实测）。若被覆盖，改用「同时写 `disabled: true`」或运行时 `mcp.disconnect` 兜底。
-2. **v1 是否同样支持 `OPENCODE_CONFIG`**：需在有 v1 的环境实测（文档 v1 支持，但桥接的 v1 复用分支不注入，仅自起 serve 时生效）。
-3. **claude `--mcp-config` 的 server 定义透传**：确认 `~/.claude.json` 的 server 定义可原样放进 `mcpServers`（含 `command/args/env` 或 `type/url/headers`）。
+**已实测（本机 `opencode v2.0.18`）**：
 
-## 10. 分期建议
+- `OPENCODE_CONFIG`（单文件）被私有 `opencode serve` 列为配置源；含 `permissions` 数组的该文件**可正常加载、无校验错误**，`GET /api/config` 回显其规则（合并成功）。
+- MCP 权限动作归一：从 `opencode-cli.exe` 打包源码核实 `McpTool` id = `` `${norm(server)}_${norm(tool)}` ``，其中 `norm = s => s.replace(/[^A-Za-z0-9_-]/g, "_")`；skill 的 `resource` 用 **skill id = 目录名/文件名**。生成器已按此归一。
+- 残余不确定：`OPENCODE_CONFIG` 与**项目级** `opencode.json` 的**优先级**。我们只 deny，且权限规则是「追加 + 后者胜」，最坏是被项目级 `allow` 覆盖 → 结果是降级放开，不会误锁；若日后需要更强，可叠加 `disabled: true` 或运行时 `mcp.disconnect` 兜底。
 
-- **2b-1（open 集，本次重点）**：opencode v1+v2 的 `OPENCODE_CONFIG` 注入（`role-config.ts` + server `extraEnv` + adapter 生成/重启）+ role-catalog 事实修正。
-- **2b-2**：claude `--mcp-config` 强制 + 定义旁路。
-- **2b-3**：前端按端文案 + 全量验收。
+**未验证**：
+
+1. **v1 是否同样支持 `OPENCODE_CONFIG`**：无 v1 环境未实测；且桥接 v1 复用外部 serve 的分支不注入，仅自起 serve 时生效（复用时会 warn 并视为无强制）。
+2. **claude `--mcp-config` 端到端**：按 CLI 契约把 `~/.claude.json` / `.mcp.json` 的 server 定义原样放进 `mcpServers`（含 `command/args/env` 或 `type/url/headers`）并加 `--strict-mcp-config`；单元 + 进程测试覆盖 argv 与文件内容，但本地无 claude 实跑。
+
+## 10. 实施状态
+
+- **2b-1（opencode v1+v2）**：✅ 已完成（`role-config.ts` + server `extraEnv`/`buildServeEnv` + adapter 生成/按指纹重启 + role-catalog skill 发现与 v1/v2 标签修正）。
+- **2b-2（claude `--mcp-config`）**：✅ 已完成（`claude/role-mcp.ts` + adapter argv + 进程测试）。
+- **2b-3（前端按端文案 + 验收）**：✅ 已完成（`RoleView.tsx` 按 `capabilities` 文案）。
 - backlog：运行时 MCP/skill API、「强角色」agent 模式、`OPENCODE_CONFIG_DIR`、claude skill 强制。
