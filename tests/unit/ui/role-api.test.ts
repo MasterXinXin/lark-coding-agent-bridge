@@ -104,6 +104,7 @@ describe('saveRoleConfig', () => {
   it('rejects a non-string prompt with a 400', async () => {
     const { state } = await createState();
     await expect(saveRoleConfig(state, { prompt: 42 })).rejects.toMatchObject({ status: 400 });
+    await expect(saveRoleConfig(state, {})).rejects.toMatchObject({ status: 400 });
   });
 
   it('truncates an over-long prompt at the byte cap', async () => {

@@ -275,4 +275,15 @@ describe('ui server (supervisor-backed)', () => {
     const res = await post('/api/role', handle.token, { prompt: 42 });
     expect(res.status).toBe(400);
   });
+
+  it('404s an unknown profile', async () => {
+    expect((await get('/api/role?profile=ghost', handle.token)).status).toBe(404);
+  });
+
+  it('clears the role when the prompt is blank', async () => {
+    await post('/api/role', handle.token, { prompt: '你是助手' });
+    const saved = await json(await post('/api/role', handle.token, { prompt: '   ' }));
+    expect(saved.prompt).toBe('');
+    expect(online.get('claude').profileConfig.role).toBeUndefined();
+  });
 });
