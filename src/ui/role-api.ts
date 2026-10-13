@@ -8,10 +8,10 @@ import {
 import { roleScope, type RoleScopeCapability } from '../agent/role-catalog';
 import type { MutableProfileState } from '../config/config-ops';
 import {
+  normalizeRole,
   ROLE_PROMPT_MAX_BYTES,
   truncateUtf8,
   type AgentKind,
-  type RoleConfig,
 } from '../config/profile-schema';
 import {
   loadRootConfig,
@@ -27,8 +27,12 @@ export interface RoleView {
   prompt: string;
   /** How this agent injects the role (from its capability). */
   injection: PromptInjectionMode;
-  /** Phase 2: how far MCP / skill scope can be controlled per bridge. */
+  /** How far MCP / skill scope can be controlled per bridge (2b enforces). */
   capabilities: { mcp: RoleScopeCapability; skills: RoleScopeCapability };
+  /** Stored MCP whitelist; absent = unrestricted. */
+  mcpEnabled?: string[];
+  /** Stored skill whitelist; absent = unrestricted. */
+  skillsEnabled?: string[];
   live: boolean;
 }
 
@@ -52,6 +56,12 @@ export function buildRoleView(state: MutableProfileState, live: boolean): RoleVi
     prompt: state.profileConfig.role?.prompt ?? '',
     injection: capabilityFor(agentKind, state).promptInjection,
     capabilities: roleScope(agentKind),
+    ...(state.profileConfig.role?.mcpEnabled !== undefined
+      ? { mcpEnabled: state.profileConfig.role.mcpEnabled }
+      : {}),
+    ...(state.profileConfig.role?.skillsEnabled !== undefined
+      ? { skillsEnabled: state.profileConfig.role.skillsEnabled }
+      : {}),
     live,
   };
 }
@@ -67,26 +77,30 @@ export async function saveRoleConfig(
   body: unknown,
   live = false,
 ): Promise<RoleView> {
-  const role = parseRoleBody(body);
+  const parsed = parseRoleBody(body);
   try {
     await withConfigFileLock(state.configPath, async () => {
       const root = await loadRootConfig(state.configPath);
       if (!root) throw new Error('config file not found');
       const profile = root.profiles[state.profile];
       if (!profile) throw new HttpError(404, `profile not found: ${state.profile}`);
-      const next = { ...profile };
       const existing = profile.role;
-      const preserved = existing
-        ? {
-            ...(existing.mcpEnabled ? { mcpEnabled: existing.mcpEnabled } : {}),
-            ...(existing.skillsEnabled ? { skillsEnabled: existing.skillsEnabled } : {}),
-          }
-        : {};
-      const merged: RoleConfig | undefined = role
-        ? { ...preserved, prompt: role.prompt }
-        : Object.keys(preserved).length > 0
-          ? { prompt: '', ...preserved }
-          : undefined;
+      // `parsed` may carry `null` (= clear); `normalizeRole` treats null as absent.
+      const candidate = {
+        prompt: parsed.prompt,
+        ...(parsed.mcpEnabled !== undefined
+          ? { mcpEnabled: parsed.mcpEnabled }
+          : existing?.mcpEnabled !== undefined
+            ? { mcpEnabled: existing.mcpEnabled }
+            : {}),
+        ...(parsed.skillsEnabled !== undefined
+          ? { skillsEnabled: parsed.skillsEnabled }
+          : existing?.skillsEnabled !== undefined
+            ? { skillsEnabled: existing.skillsEnabled }
+            : {}),
+      };
+      const merged = normalizeRole(candidate);
+      const next = { ...profile };
       if (merged) next.role = merged;
       else delete next.role;
       root.profiles[state.profile] = next;
@@ -101,15 +115,35 @@ export async function saveRoleConfig(
   return buildRoleView(state, live);
 }
 
-/** Parse `{ prompt }`; blank prompt means "remove the role". */
-function parseRoleBody(body: unknown): RoleConfig | undefined {
+interface ParsedRoleBody {
+  prompt: string;
+  /** Present iff the body supplied `mcpEnabled`; `null` = clear. */
+  mcpEnabled?: string[] | null;
+  /** Present iff the body supplied `skillsEnabled`; `null` = clear. */
+  skillsEnabled?: string[] | null;
+}
+
+/** Parse `{ prompt, mcpEnabled?, skillsEnabled? }`; whitelists accept a string[] or null (clear). */
+function parseRoleBody(body: unknown): ParsedRoleBody {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new HttpError(400, 'expected a JSON object body');
   }
-  const raw = body as { prompt?: unknown };
-  if (typeof raw.prompt !== 'string') {
-    throw new HttpError(400, 'prompt must be a string');
+  const raw = body as { prompt?: unknown; mcpEnabled?: unknown; skillsEnabled?: unknown };
+  if (typeof raw.prompt !== 'string') throw new HttpError(400, 'prompt must be a string');
+  const parsed: ParsedRoleBody = {
+    prompt: truncateUtf8(raw.prompt.trim(), ROLE_PROMPT_MAX_BYTES),
+  };
+  if (raw.mcpEnabled !== undefined) parsed.mcpEnabled = parseWhitelist(raw.mcpEnabled, 'mcpEnabled');
+  if (raw.skillsEnabled !== undefined) {
+    parsed.skillsEnabled = parseWhitelist(raw.skillsEnabled, 'skillsEnabled');
   }
-  const prompt = truncateUtf8(raw.prompt.trim(), ROLE_PROMPT_MAX_BYTES);
-  return prompt ? { prompt } : undefined;
+  return parsed;
+}
+
+function parseWhitelist(value: unknown, field: string): string[] | null {
+  if (value === null) return null;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new HttpError(400, `${field} must be a string array or null`);
+  }
+  return value;
 }

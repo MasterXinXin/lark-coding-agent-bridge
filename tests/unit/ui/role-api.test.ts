@@ -159,6 +159,45 @@ describe('saveRoleConfig', () => {
     expect(view.prompt).toBe('');
     expect(state.profileConfig.role).toEqual({ prompt: '', mcpEnabled: ['mcp-a'] });
   });
+
+  it('stores, echoes and clears the MCP / skill whitelists', async () => {
+    const { configPath, state } = await createState();
+
+    const set = await saveRoleConfig(state, { prompt: 'x', mcpEnabled: ['a', 'a', ' '], skillsEnabled: [] });
+    expect(set.mcpEnabled).toEqual(['a']);
+    expect(set.skillsEnabled).toEqual([]);
+    expect(state.profileConfig.role).toEqual({ prompt: 'x', mcpEnabled: ['a'], skillsEnabled: [] });
+
+    // omitted keys keep the existing selection
+    const kept = await saveRoleConfig(state, { prompt: 'y' });
+    expect(kept.mcpEnabled).toEqual(['a']);
+    expect(kept.skillsEnabled).toEqual([]);
+
+    // null clears back to "unlimited"
+    const cleared = await saveRoleConfig(state, { prompt: 'y', mcpEnabled: null });
+    expect(cleared.mcpEnabled).toBeUndefined();
+    expect(cleared.skillsEnabled).toEqual([]);
+    expect((await loadRootConfig(configPath))!.profiles.claude!.role).toEqual({
+      prompt: 'y',
+      skillsEnabled: [],
+    });
+  });
+
+  it('400s a whitelist that is neither a string array nor null', async () => {
+    const { state } = await createState();
+    await expect(saveRoleConfig(state, { prompt: 'x', mcpEnabled: 42 })).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(
+      saveRoleConfig(state, { prompt: 'x', skillsEnabled: [1, 2] }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('echoes stored whitelists on the role view', async () => {
+    const { state } = await createState();
+    await saveRoleConfig(state, { prompt: 'x', mcpEnabled: ['a'] });
+    expect(buildRoleView(state, true)).toMatchObject({ mcpEnabled: ['a'] });
+  });
 });
 
 describe('truncateUtf8', () => {
