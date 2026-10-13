@@ -268,3 +268,57 @@ describe('codex MCP discovery', () => {
     expect(section.items).toEqual([]);
   });
 });
+
+import type { MutableProfileState } from '../../../src/config/config-ops';
+import { buildRoleCatalog } from '../../../src/agent/role-catalog';
+
+function fakeState(configPath: string, profileConfig: Record<string, unknown>): MutableProfileState {
+  return {
+    configPath,
+    profile: 'p',
+    cfg: {} as never,
+    profileConfig: profileConfig as never,
+  };
+}
+
+describe('buildRoleCatalog', () => {
+  it('dispatches claude to claude discovery with the configured workspace', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    await mkdir(join(workspace, '.claude', 'skills', 's1'), { recursive: true });
+    const state = fakeState(join(workspace, 'config.json'), {
+      agentKind: 'claude',
+      workspaces: { default: workspace },
+    });
+    const view = await buildRoleCatalog(state, { home });
+    expect(view).toMatchObject({
+      profile: 'p',
+      agentKind: 'claude',
+      capabilities: { mcp: 'control', skills: 'readonly' },
+    });
+    expect(view.skills.items).toEqual([{ name: 's1', source: '.claude/skills' }]);
+  });
+
+  it('dispatches codex to a read-only config.toml and no skills', async () => {
+    const codexHome = await tempDir();
+    await writeFile(join(codexHome, 'config.toml'), '[mcp_servers.x]\ncommand = "x"\n', 'utf8');
+    const state = fakeState(join(codexHome, 'config.json'), {
+      agentKind: 'codex',
+      codex: { binaryPath: 'codex', codexHome },
+    });
+    const view = await buildRoleCatalog(state);
+    expect(view.capabilities).toEqual({ mcp: 'readonly', skills: 'none' });
+    expect(view.mcp.items).toEqual([{ name: 'x', transport: 'stdio', source: 'config.toml' }]);
+    expect(view.skills).toEqual({ available: false, error: '该桥接无 skill', items: [] });
+  });
+
+  it('dispatches opencode to file discovery and defers skills to 2b', async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, 'opencode.json'), JSON.stringify({ mcp: { a: { type: 'local' } } }), 'utf8');
+    const state = fakeState(join(dir, 'config.json'), { agentKind: 'opencode' });
+    const view = await buildRoleCatalog(state, { env: { OPENCODE_CONFIG_DIR: dir } });
+    expect(view.capabilities).toEqual({ mcp: 'control', skills: 'control' });
+    expect(view.mcp.items).toEqual([{ name: 'a', transport: 'stdio', source: 'opencode.json' }]);
+    expect(view.skills.available).toBe(false);
+  });
+});

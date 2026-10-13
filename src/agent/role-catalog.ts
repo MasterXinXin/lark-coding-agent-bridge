@@ -1,6 +1,8 @@
 import type { Dirent } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { profileAppPaths, type MutableProfileState } from '../config/config-ops';
 import type { AgentKind } from '../config/profile-schema';
 import { opencodeConfigDirCandidates, parseJsonc } from '../workspace/codegraph';
 
@@ -266,4 +268,41 @@ function stripTomlComment(line: string): string {
     if (ch === '#') return line.slice(0, i);
   }
   return line;
+}
+
+/** Discover the profile's MCP / skill catalog. Never throws; failures degrade to `available:false`. */
+export async function buildRoleCatalog(
+  state: MutableProfileState,
+  opts: RoleCatalogOptions = {},
+): Promise<RoleCatalogView> {
+  const agentKind = state.profileConfig.agentKind;
+  const capabilities = roleScope(agentKind);
+  try {
+    const home = opts.home ?? homedir();
+    const appPaths = profileAppPaths(state);
+    const workspaceDir = state.profileConfig.workspaces?.default ?? appPaths.defaultWorkspaceDir;
+    const codexHome = state.profileConfig.codex?.codexHome ?? join(appPaths.profileDir, 'codex-home');
+
+    let mcp: CatalogSection<McpServerEntry>;
+    let skills: CatalogSection<SkillEntry>;
+    switch (agentKind) {
+      case 'opencode':
+        mcp = await discoverOpencodeMcp(opts);
+        skills = { available: false, error: '2b 支持', items: [] };
+        break;
+      case 'codex':
+        mcp = await discoverCodexMcp(codexHome);
+        skills = { available: false, error: '该桥接无 skill', items: [] };
+        break;
+      case 'claude':
+        mcp = await discoverClaudeMcp({ home, workspaceDir });
+        skills = await discoverClaudeSkills({ home, workspaceDir });
+        break;
+    }
+    return { profile: state.profile, agentKind, capabilities, mcp, skills };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    const empty = { available: false as const, error, items: [] };
+    return { profile: state.profile, agentKind, capabilities, mcp: { ...empty }, skills: { ...empty } };
+  }
 }
