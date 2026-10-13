@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 import type { JobStatus, JobView } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -196,6 +197,13 @@ export function JobProgressDialog({
 
   const displayPct = status === "succeeded" ? 100 : parsedPct;
   const elapsedMs = snapshot ? (snapshot.endedAt ?? nowTick) - snapshot.startedAt : 0;
+  // Seconds since the newest log line, so a quiet job still proves it is alive
+  // (and shows how long it has been silent) instead of looking frozen.
+  const lastOutputAt = logs.length > 0 ? logs[logs.length - 1].at : undefined;
+  const sinceLastOutput =
+    status === "running" && lastOutputAt !== undefined
+      ? Math.max(0, Math.floor((nowTick - lastOutputAt) / 1000))
+      : null;
   const badge =
     lost && !snapshot ? { variant: "secondary" as const, text: "状态丢失" } : statusBadge(status);
 
@@ -217,6 +225,12 @@ export function JobProgressDialog({
         <DialogHeader>
           <div className="flex items-center gap-2">
             <DialogTitle className="truncate">{snapshot?.label ?? "任务进度"}</DialogTitle>
+            {!lost && status === "running" && (
+              <Loader2
+                aria-label="执行中"
+                className="size-3.5 shrink-0 animate-spin text-primary"
+              />
+            )}
             <Badge variant={badge.variant}>{badge.text}</Badge>
             <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
               {formatElapsed(elapsedMs)}
@@ -264,6 +278,16 @@ export function JobProgressDialog({
             </div>
           ))}
         </div>
+
+        {!lost && status === "running" && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 aria-hidden className="size-3 animate-spin" />
+            <span>
+              正在执行…
+              {sinceLastOutput !== null ? `（距上次输出 ${sinceLastOutput}s）` : ""}
+            </span>
+          </div>
+        )}
 
         {status === "failed" && snapshot?.error && (
           <p className="text-sm text-destructive">{snapshot.error}</p>
