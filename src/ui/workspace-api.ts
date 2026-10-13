@@ -17,6 +17,8 @@ import {
   pullRepo,
   switchBranch,
   type GitRunner,
+  type PullOutcome,
+  type PullStrategy,
   type RepoStatus,
 } from '../git/git-ops';
 import {
@@ -477,6 +479,25 @@ export async function setWorkspaceDir(
   return projectsView(profile, rootDir);
 }
 
+/**
+ * When the configured branch drifted from the checkout (e.g. a manual `git
+ * checkout`), move the tree back before pulling. A dirty tree can't be moved
+ * safely, so the pull is skipped instead. `fetch-only` never touches the tree.
+ */
+async function alignBranchBeforePull(
+  projectRun: GitRunner,
+  dir: string,
+  branch: string,
+  strategy: PullStrategy,
+): Promise<PullOutcome | undefined> {
+  if (strategy === 'fetch-only') return undefined;
+  const status = await repoStatus(projectRun, dir).catch(() => undefined);
+  if (!status?.branch || status.branch === branch) return undefined;
+  if (status.dirty) return { status: 'skipped', detail: `有未提交改动，无法切换到 ${branch}` };
+  await switchBranch(projectRun, dir, branch);
+  return undefined;
+}
+
 export async function pullProjects(
   profile: string,
   rootDir: string | undefined,
@@ -510,34 +531,40 @@ export async function pullProjects(
         result = 'failed';
         detail = '目录不存在或不是 git 仓库，请重新添加项目';
       } else {
-        if ((await projectIndexInfo(dir)).indexed) {
-          // A legacy index leaves `.codegraph/` untracked and blocks ff-only
-          // pulls; exclude it locally so the repo is clean again.
-          await ensureCodegraphExcluded(dir).catch(() => undefined);
-        }
-        const outcome = await pullRepo(projectRun, dir, schedule.strategy);
-        result = outcome.status;
-        detail = outcome.detail;
-        if (outcome.status === 'updated' && codegraph?.available) {
-          // Only a real update needs re-indexing; "up-to-date"/"skipped" do not.
-          // A sync failure must not downgrade a successful pull, so swallow+log.
-          try {
-            if ((await projectIndexInfo(dir)).indexed) {
-              const synced = await codegraph.sync(dir);
-              if (!synced.ok) {
-                log.warn('workspace', 'codegraph-sync-failed', {
+        const drift = await alignBranchBeforePull(projectRun, dir, project.branch, schedule.strategy);
+        if (drift) {
+          result = drift.status;
+          detail = drift.detail;
+        } else {
+          if ((await projectIndexInfo(dir)).indexed) {
+            // A legacy index leaves `.codegraph/` untracked and blocks ff-only
+            // pulls; exclude it locally so the repo is clean again.
+            await ensureCodegraphExcluded(dir).catch(() => undefined);
+          }
+          const outcome = await pullRepo(projectRun, dir, schedule.strategy);
+          result = outcome.status;
+          detail = outcome.detail;
+          if (outcome.status === 'updated' && codegraph?.available) {
+            // Only a real update needs re-indexing; "up-to-date"/"skipped" do not.
+            // A sync failure must not downgrade a successful pull, so swallow+log.
+            try {
+              if ((await projectIndexInfo(dir)).indexed) {
+                const synced = await codegraph.sync(dir);
+                if (!synced.ok) {
+                  log.warn('workspace', 'codegraph-sync-failed', {
+                    id: project.id,
+                    detail: synced.detail,
+                  });
+                }
+              } else {
+                log.info('workspace', 'codegraph-sync-skipped', {
                   id: project.id,
-                  detail: synced.detail,
+                  reason: 'not-indexed',
                 });
               }
-            } else {
-              log.info('workspace', 'codegraph-sync-skipped', {
-                id: project.id,
-                reason: 'not-indexed',
-              });
+            } catch (err) {
+              log.warn('workspace', 'codegraph-sync-failed', { id: project.id, err: String(err) });
             }
-          } catch (err) {
-            log.warn('workspace', 'codegraph-sync-failed', { id: project.id, err: String(err) });
           }
         }
       }

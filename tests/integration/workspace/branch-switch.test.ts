@@ -157,4 +157,22 @@ describe('project branch switch', { timeout: 60_000 }, () => {
 
     expect(syncDirs).toEqual([]);
   });
+
+  it('follows the configured branch on pull, but not under fetch-only', async () => {
+    const origin = await makeOrigin(rootDir);
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'x' }] });
+    const id = (await projectsView('claude', rootDir)).projects[0]!.id;
+    // Drift: the checkout is on `release` while the config says `main`.
+    git(join(workspace, 'x'), ['checkout', '-q', 'release']);
+
+    // fetch-only must not move the working tree.
+    await setSchedule('claude', rootDir, { strategy: 'fetch-only' });
+    await pullProjects('claude', rootDir, { id });
+    expect((await projectsView('claude', rootDir)).projects[0]!.status.branch).toBe('release');
+
+    // ff-only switches back to the configured branch before pulling.
+    await setSchedule('claude', rootDir, { strategy: 'ff-only' });
+    await pullProjects('claude', rootDir, { id });
+    expect((await projectsView('claude', rootDir)).projects[0]!.status.branch).toBe('main');
+  });
 });
