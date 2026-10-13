@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
-import type { RoleView as RoleViewModel } from "@/lib/types";
+import type {
+  CatalogSection,
+  RoleCatalogView,
+  RoleView as RoleViewModel,
+} from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
 
@@ -12,30 +17,119 @@ const INJECTION_LABEL: Record<string, string> = {
   "prompt-body-system": "每轮 system 字段",
 };
 
+/** Stored selection → checked set. Absent whitelist means "unlimited" (all on). */
+function initialChosen(items: Array<{ name: string }>, stored?: string[]): Set<string> {
+  if (stored === undefined) return new Set(items.map((i) => i.name));
+  const names = new Set(items.map((i) => i.name));
+  return new Set(stored.filter((n) => names.has(n)));
+}
+
+/** Checked set → request body value: all = null (unrestricted), else the checked subset. */
+function chosenToBody(chosen: Set<string>, names: string[]): string[] | null {
+  if (names.every((n) => chosen.has(n))) return null;
+  return names.filter((n) => chosen.has(n));
+}
+
+function ScopeSection({
+  title,
+  capability,
+  section,
+  chosen,
+  onToggle,
+}: {
+  title: string;
+  capability: "control" | "readonly" | "none";
+  section: CatalogSection<{ name: string; transport?: string; source: string }>;
+  chosen: Set<string>;
+  onToggle: (name: string) => void;
+}) {
+  if (capability === "none") return null;
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium">{title}</p>
+      {!section.available ? (
+        <p className="text-xs text-muted-foreground">{section.error ?? "无法读取"}（重试见上）。</p>
+      ) : section.items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">未发现条目。</p>
+      ) : (
+        <div className="space-y-1">
+          {section.items.map((item) => (
+            <label key={item.name} className="flex items-center justify-between gap-3 text-sm">
+              <span className="truncate">
+                {item.name}
+                {item.transport ? <span className="text-muted-foreground"> · {item.transport}</span> : null}
+                <span className="text-muted-foreground"> · {item.source}</span>
+              </span>
+              <Switch
+                checked={chosen.has(item.name)}
+                disabled={capability !== "control"}
+                onCheckedChange={() => onToggle(item.name)}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RoleView({ profile }: { profile: string }) {
   const q = `profile=${encodeURIComponent(profile)}`;
   const [view, setView] = useState<RoleViewModel | null>(null);
+  const [catalog, setCatalog] = useState<RoleCatalogView | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [mcpChosen, setMcpChosen] = useState<Set<string>>(new Set());
+  const [skillsChosen, setSkillsChosen] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    apiGet<RoleViewModel>(`/api/role?${q}`)
-      .then((v) => {
-        setView(v);
-        setPrompt(v.prompt);
-        setError(null);
-      })
-      .catch((e) => setError(String((e as Error).message ?? e)));
+  const load = useCallback(async () => {
+    setError(null);
+    setCatalogError(null);
+    let v: RoleViewModel;
+    try {
+      v = await apiGet<RoleViewModel>(`/api/role?${q}`);
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
+      return;
+    }
+    setView(v);
+    setPrompt(v.prompt);
+    try {
+      const c = await apiGet<RoleCatalogView>(`/api/role/catalog?${q}`);
+      setCatalog(c);
+      setMcpChosen(initialChosen(c.mcp.items, v.mcpEnabled));
+      setSkillsChosen(initialChosen(c.skills.items, v.skillsEnabled));
+    } catch (e) {
+      setCatalog(null);
+      setCatalogError(String((e as Error).message ?? e));
+    }
   }, [q]);
   useEffect(() => {
     void load();
   }, [load]);
 
+  function toggle(set: Set<string>, setter: (s: Set<string>) => void, name: string) {
+    const next = new Set(set);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    setter(next);
+  }
+
   async function save() {
     setBusy(true);
     try {
-      const v = await apiPost<RoleViewModel>(`/api/role?${q}`, { prompt });
+      const body: Record<string, unknown> = { prompt };
+      if (catalog && view) {
+        if (view.capabilities.mcp === "control" && catalog.mcp.available) {
+          body.mcpEnabled = chosenToBody(mcpChosen, catalog.mcp.items.map((i) => i.name));
+        }
+        if (view.capabilities.skills === "control" && catalog.skills.available) {
+          body.skillsEnabled = chosenToBody(skillsChosen, catalog.skills.items.map((i) => i.name));
+        }
+      }
+      const v = await apiPost<RoleViewModel>(`/api/role?${q}`, body);
       setView(v);
       setPrompt(v.prompt);
       toast.success("已保存角色设定");
@@ -50,6 +144,7 @@ export function RoleView({ profile }: { profile: string }) {
   if (!view) return <p className="text-muted-foreground text-sm">加载中…</p>;
 
   const liveText = view.live ? "保存后下一轮运行生效" : "该 profile 未在线，保存后下次启动生效";
+  const showScope = view.capabilities.mcp !== "none" || view.capabilities.skills !== "none";
 
   return (
     <div className="space-y-4">
@@ -70,13 +165,55 @@ export function RoleView({ profile }: { profile: string }) {
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="例如：你是一名严谨的财务分析师，回答用中文，先给结论再给依据。"
           />
-          <div className="flex justify-end">
-            <Button size="sm" disabled={busy} onClick={save}>
-              {busy ? "保存中…" : "保存"}
-            </Button>
-          </div>
         </CardContent>
       </Card>
+
+      {showScope ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>MCP / Skill 范围</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              勾选会保存到该 profile，但<strong>当前仅保存选择，尚未强制生效</strong>（将在二期 2b 落地）。
+              全选 = 不限制；全部取消 = 全部禁用。
+            </p>
+            {catalogError ? (
+              <p className="text-destructive text-sm">
+                目录拉取失败：{catalogError}{" "}
+                <Button size="sm" variant="outline" onClick={() => void load()}>
+                  重试
+                </Button>
+              </p>
+            ) : catalog ? (
+              <>
+                <ScopeSection
+                  title="MCP servers"
+                  capability={view.capabilities.mcp}
+                  section={catalog.mcp}
+                  chosen={mcpChosen}
+                  onToggle={(n) => toggle(mcpChosen, setMcpChosen, n)}
+                />
+                <ScopeSection
+                  title="Skills"
+                  capability={view.capabilities.skills}
+                  section={catalog.skills}
+                  chosen={skillsChosen}
+                  onToggle={(n) => toggle(skillsChosen, setSkillsChosen, n)}
+                />
+              </>
+            ) : (
+              <p className="text-muted-foreground text-sm">目录加载中…</p>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="flex justify-end">
+        <Button size="sm" disabled={busy} onClick={save}>
+          {busy ? "保存中…" : "保存"}
+        </Button>
+      </div>
     </div>
   );
 }

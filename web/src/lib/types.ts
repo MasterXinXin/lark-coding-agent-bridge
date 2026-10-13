@@ -67,17 +67,49 @@ export type PromptInjectionMode =
 
 export type RoleScopeCapability = "control" | "readonly" | "none";
 
-/** Per-profile role (system-prompt soft constraint). */
+export type McpTransport = "stdio" | "http" | "sse" | "unknown";
+
+export interface McpServerEntry {
+  name: string;
+  transport: McpTransport;
+  source: string;
+}
+
+export interface SkillEntry {
+  name: string;
+  source: string;
+}
+
+export interface CatalogSection<T> {
+  available: boolean;
+  error?: string;
+  items: T[];
+}
+
+/** Per-profile role (system-prompt soft constraint) + scope catalog. */
 export interface RoleView {
   profile: string;
   agentKind: AgentKind;
   prompt: string;
   /** How this agent injects the role. */
   injection: PromptInjectionMode;
-  /** Phase 2: how far MCP / skill scope can be controlled. */
+  /** How far MCP / skill scope can be controlled. */
   capabilities: { mcp: RoleScopeCapability; skills: RoleScopeCapability };
+  /** Stored MCP whitelist; absent = unrestricted. */
+  mcpEnabled?: string[];
+  /** Stored skill whitelist; absent = unrestricted. */
+  skillsEnabled?: string[];
   /** True when this profile's process hosts the UI (edits apply live). */
   live: boolean;
+}
+
+/** GET /api/role/catalog response. */
+export interface RoleCatalogView {
+  profile: string;
+  agentKind: AgentKind;
+  capabilities: { mcp: RoleScopeCapability; skills: RoleScopeCapability };
+  mcp: CatalogSection<McpServerEntry>;
+  skills: CatalogSection<SkillEntry>;
 }
 
 /** A chat the bot is a member of, for the group picker. */
