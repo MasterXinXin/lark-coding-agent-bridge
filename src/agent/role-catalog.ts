@@ -215,6 +215,8 @@ export async function discoverCodexMcp(codexHome: string): Promise<CatalogSectio
  * Minimal read-only TOML subset: only `[mcp_servers.<name>]` table headers and
  * a `url`/`command` key inside each. Quoted table keys, inline tables and
  * multi-line strings are unsupported (such entries are skipped, not errored).
+ * Any other table header (nested sub-table, `[[...]]`, unrelated section) ends
+ * the current server so its keys are not attributed elsewhere.
  */
 export function parseCodexMcpServers(toml: string): McpServerEntry[] {
   const out: McpServerEntry[] = [];
@@ -233,6 +235,10 @@ export function parseCodexMcpServers(toml: string): McpServerEntry[] {
       seen.add(name);
       current = { name, transport: 'unknown', source: 'config.toml' };
       out.push(current);
+      continue;
+    }
+    if (line.startsWith('[')) {
+      current = null;
       continue;
     }
     if (!current) continue;

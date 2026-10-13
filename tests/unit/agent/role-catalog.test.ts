@@ -227,4 +227,44 @@ describe('codex MCP discovery', () => {
     expect(section.available).toBe(false);
     expect(section.items).toEqual([]);
   });
+
+  it('ignores url/command keys inside a nested sub-table', async () => {
+    const codexHome = await tempDir();
+    await writeFile(
+      join(codexHome, 'config.toml'),
+      ['[mcp_servers.docs]', 'command = "docs-mcp"', '[mcp_servers.docs.env]', 'url = "https://nope.example"', ''].join('\n'),
+      'utf8',
+    );
+    const section = await discoverCodexMcp(codexHome);
+    expect(section.items).toEqual([{ name: 'docs', transport: 'stdio', source: 'config.toml' }]);
+  });
+
+  it('ignores keys in unrelated later tables', async () => {
+    const codexHome = await tempDir();
+    await writeFile(
+      join(codexHome, 'config.toml'),
+      ['[mcp_servers.docs]', 'command = "docs-mcp"', '[model_providers.custom]', 'url = "https://example.com"', ''].join('\n'),
+      'utf8',
+    );
+    const section = await discoverCodexMcp(codexHome);
+    expect(section.items).toEqual([{ name: 'docs', transport: 'stdio', source: 'config.toml' }]);
+  });
+
+  it('handles duplicate and array-of-table headers without duplicating servers', async () => {
+    const codexHome = await tempDir();
+    await writeFile(
+      join(codexHome, 'config.toml'),
+      ['[mcp_servers.docs]', 'command = "docs-mcp"', '[mcp_servers.docs]', 'url = "https://x"', '[[mcp_servers.docs]]', 'command = "y"', ''].join('\n'),
+      'utf8',
+    );
+    const section = await discoverCodexMcp(codexHome);
+    expect(section.items).toEqual([{ name: 'docs', transport: 'stdio', source: 'config.toml' }]);
+  });
+
+  it('ignores quoted table names', async () => {
+    const codexHome = await tempDir();
+    await writeFile(join(codexHome, 'config.toml'), ['[mcp_servers."my server"]', 'command = "x"', ''].join('\n'), 'utf8');
+    const section = await discoverCodexMcp(codexHome);
+    expect(section.items).toEqual([]);
+  });
 });
