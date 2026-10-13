@@ -189,3 +189,42 @@ describe('claude MCP + skill discovery', () => {
     expect(section).toEqual({ available: true, items: [] });
   });
 });
+
+import { discoverCodexMcp } from '../../../src/agent/role-catalog';
+
+describe('codex MCP discovery', () => {
+  it('extracts [mcp_servers.<name>] names and transport, ignoring comments', async () => {
+    const codexHome = await tempDir();
+    await writeFile(
+      join(codexHome, 'config.toml'),
+      [
+        '# top comment',
+        '[mcp_servers.docs]',
+        'command = "docs-mcp"   # inline comment',
+        '[mcp_servers.web]',
+        'url = "https://example.com"',
+        '',
+        '[mcp_servers.docs.env]',
+        'TOKEN = "x"',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const section = await discoverCodexMcp(codexHome);
+    expect(section).toEqual({
+      available: true,
+      items: [
+        { name: 'docs', transport: 'stdio', source: 'config.toml' },
+        { name: 'web', transport: 'http', source: 'config.toml' },
+      ],
+    });
+  });
+
+  it('reports unavailable when config.toml is missing', async () => {
+    const codexHome = await tempDir();
+    const section = await discoverCodexMcp(codexHome);
+    expect(section.available).toBe(false);
+    expect(section.items).toEqual([]);
+  });
+});

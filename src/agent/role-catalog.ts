@@ -195,3 +195,69 @@ export async function discoverClaudeSkills(
   }
   return { available: true, items };
 }
+
+/** MCP servers from `${codexHome}/config.toml` (`[mcp_servers.<name>]` tables). */
+export async function discoverCodexMcp(codexHome: string): Promise<CatalogSection<McpServerEntry>> {
+  let text: string;
+  try {
+    text = await readFile(join(codexHome, 'config.toml'), 'utf8');
+  } catch {
+    return { available: false, error: '未找到 config.toml', items: [] };
+  }
+  try {
+    return { available: true, items: parseCodexMcpServers(text) };
+  } catch {
+    return { available: false, error: '解析 config.toml 失败', items: [] };
+  }
+}
+
+/**
+ * Minimal read-only TOML subset: only `[mcp_servers.<name>]` table headers and
+ * a `url`/`command` key inside each. Quoted table keys, inline tables and
+ * multi-line strings are unsupported (such entries are skipped, not errored).
+ */
+export function parseCodexMcpServers(toml: string): McpServerEntry[] {
+  const out: McpServerEntry[] = [];
+  const seen = new Set<string>();
+  let current: McpServerEntry | null = null;
+  for (const rawLine of toml.split(/\r?\n/)) {
+    const line = stripTomlComment(rawLine).trim();
+    if (!line) continue;
+    const header = /^\[\s*mcp_servers\.([A-Za-z0-9_-]+)\s*\]$/.exec(line);
+    if (header) {
+      const name = header[1]!;
+      if (seen.has(name)) {
+        current = null;
+        continue;
+      }
+      seen.add(name);
+      current = { name, transport: 'unknown', source: 'config.toml' };
+      out.push(current);
+      continue;
+    }
+    if (!current) continue;
+    if (/^url\s*=/.test(line)) current.transport = 'http';
+    else if (/^command\s*=/.test(line) && current.transport === 'unknown') current.transport = 'stdio';
+  }
+  return out;
+}
+
+/** Remove a trailing `#` comment that is not inside a quoted string. */
+function stripTomlComment(line: string): string {
+  let inString = false;
+  let quote = '';
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]!;
+    if (inString) {
+      if (ch === quote && line[i - 1] !== '\\') inString = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      quote = ch;
+      continue;
+    }
+    if (ch === '#') return line.slice(0, i);
+  }
+  return line;
+}
