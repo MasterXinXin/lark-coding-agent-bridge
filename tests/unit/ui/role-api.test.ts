@@ -198,6 +198,23 @@ describe('saveRoleConfig', () => {
     await saveRoleConfig(state, { prompt: 'x', mcpEnabled: ['a'] });
     expect(buildRoleView(state, true)).toMatchObject({ mcpEnabled: ['a'] });
   });
+
+  it('clears the skill whitelist with null', async () => {
+    const { state } = await createState();
+    await saveRoleConfig(state, { prompt: 'x', skillsEnabled: ['s'] });
+    const cleared = await saveRoleConfig(state, { prompt: 'x', skillsEnabled: null });
+    expect(cleared.skillsEnabled).toBeUndefined();
+    expect(buildRoleView(state, true).skillsEnabled).toBeUndefined();
+  });
+
+  it('omits whitelists from a fresh view and drops the role when nothing is left', async () => {
+    const { configPath, state } = await createState();
+    expect(buildRoleView(state, true)).not.toHaveProperty('mcpEnabled');
+    expect(buildRoleView(state, true)).not.toHaveProperty('skillsEnabled');
+    await saveRoleConfig(state, { prompt: '', mcpEnabled: null, skillsEnabled: null });
+    const root = await loadRootConfig(configPath);
+    expect(root!.profiles.claude!.role).toBeUndefined();
+  });
 });
 
 describe('truncateUtf8', () => {

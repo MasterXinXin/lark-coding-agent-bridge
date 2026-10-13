@@ -7,18 +7,14 @@ import {
 } from '../agent/capability';
 import { roleScope, type RoleScopeCapability } from '../agent/role-catalog';
 import type { MutableProfileState } from '../config/config-ops';
-import {
-  normalizeRole,
-  ROLE_PROMPT_MAX_BYTES,
-  truncateUtf8,
-  type AgentKind,
-} from '../config/profile-schema';
+import { normalizeRole, type AgentKind } from '../config/profile-schema';
 import {
   loadRootConfig,
   runtimeProfileConfig,
   saveRootConfig,
   withConfigFileLock,
 } from '../config/profile-store';
+import { log } from '../core/logger';
 import { HttpError } from './http';
 
 export interface RoleView {
@@ -107,6 +103,7 @@ export async function saveRoleConfig(
       await saveRootConfig(root, state.configPath);
       state.profileConfig = root.profiles[state.profile]!;
       state.cfg = runtimeProfileConfig(root, state.profile);
+      log.info('ui', 'role-saved', { profile: state.profile, live });
     });
   } catch (err) {
     if (err instanceof HttpError) throw err;
@@ -130,9 +127,7 @@ function parseRoleBody(body: unknown): ParsedRoleBody {
   }
   const raw = body as { prompt?: unknown; mcpEnabled?: unknown; skillsEnabled?: unknown };
   if (typeof raw.prompt !== 'string') throw new HttpError(400, 'prompt must be a string');
-  const parsed: ParsedRoleBody = {
-    prompt: truncateUtf8(raw.prompt.trim(), ROLE_PROMPT_MAX_BYTES),
-  };
+  const parsed: ParsedRoleBody = { prompt: raw.prompt };
   if (raw.mcpEnabled !== undefined) parsed.mcpEnabled = parseWhitelist(raw.mcpEnabled, 'mcpEnabled');
   if (raw.skillsEnabled !== undefined) {
     parsed.skillsEnabled = parseWhitelist(raw.skillsEnabled, 'skillsEnabled');
@@ -142,7 +137,7 @@ function parseRoleBody(body: unknown): ParsedRoleBody {
 
 function parseWhitelist(value: unknown, field: string): string[] | null {
   if (value === null) return null;
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+  if (!Array.isArray(value) || !value.every((item): item is string => typeof item === 'string')) {
     throw new HttpError(400, `${field} must be a string array or null`);
   }
   return value;
