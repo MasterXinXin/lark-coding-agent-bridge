@@ -145,7 +145,7 @@ export function CodegraphCard({
             <p className="text-xs text-muted-foreground">
               MCP 已接入
               {system?.mcp.configPath ? `（${system.mcp.configPath}）` : ""}
-              。新项目 clone 后会自动建立索引；git 有更新时自动增量同步。
+              。建索引需手动发起（首次拉取不会自动建）；已索引项目在 git 拉取确有文件更新时自动增量同步。
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <Button

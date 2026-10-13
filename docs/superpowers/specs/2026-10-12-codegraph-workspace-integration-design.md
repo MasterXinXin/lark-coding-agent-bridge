@@ -3,6 +3,7 @@
 - 日期：2026-10-12
 - 关联：`2026-10-10-workspace-git-projects-design.md`（工作空间与 Git 项目）、`2026-10-12-console-schedule-ui-design.md`（定时拉取 UI）、`2026-10-12-git-job-progress-design.md`（后台作业进度）
 - 起因：工作空间页已支持项目添加 / 定时拉取，但项目没有代码知识图谱索引。希望每个项目独立建立 CodeGraph 索引，并在控制台统一做「CLI 安装检测 → MCP 接入 → 逐项目初始化 → git 更新后增量同步」。
+- 修订（2026-10-13）：**不再**在首次拉取（添加项目 clone）后自动 `codegraph init`。用户首次拉取时通常还想先看代码、按需索引，自动建索引会长时间占用后台作业；改为仅由用户显式点「初始化」/「初始化全部未索引项目」。拉取确有文件更新时的增量 `codegraph sync` 保持不变（前提：CLI 已装且该项目已索引）。
 
 ## 1. 目标
 
@@ -10,7 +11,7 @@
 
 1. 看到 CodeGraph CLI 是否安装；未安装时用**平台脚本**或 **npm** 两种方式一键安装。
 2. 看到 codegraph MCP 是否已接入本机 agent；未接入时一键 `codegraph install --yes`（全 agent 写入）。
-3. 新添加的项目在 clone 成功后**自动 `codegraph init`**；已存在但未索引的项目可**批量初始化**。
+3. 已存在但未索引的项目可**批量初始化**；新添加的项目首次 clone 后**不再自动建索引**，由用户显式发起。
 4. git 拉取**确有更新**时，自动对已索引项目 `codegraph sync` 增量同步。
 5. 在项目行看到「已索引 / 未索引 / 不可用」状态，并能按需查看单个项目的索引统计。
 
@@ -207,14 +208,14 @@ export interface CodegraphStats { initialized: boolean; fileCount: number; nodeC
   - `projectStats` 解析真实 `status --json` 样例；字段缺失时兜底。
 - `tests/integration/ui/workspace-routes.test.ts` 延伸（fake `CodegraphHook`）：
   - `pullProjects` 仅 `updated` 触发 sync；`up-to-date`/`skipped` 不触发；未索引不触发。
-  - `addProjects` clone 成功后调用 init；init 抛错不影响项目记录。
+  - `addProjects` 只 clone，不再调用 init；init 仅在用户显式操作时发起。
 - 前端无单测设施：`pnpm exec tsc --noEmit -p web/tsconfig.json` + `pnpm build`。
 
 ## 11. 验收标准
 
 1. 控制台工作空间页出现「CodeGraph」卡片：CLI 未装时给出平台脚本 / npm 两种安装方式并可一键执行（带二次确认与进度）。
 2. CLI 装完后同一作业自动执行 `codegraph install --yes`（全 agent），卡片随后显示「已接入」与配置路径，并提示重启生效。
-3. 新添加项目在 clone 成功后自动 `codegraph init`；「初始化全部未索引项目」可批量补齐历史项目。
+3. 新添加项目 clone 后**不**自动 `codegraph init`；「初始化全部未索引项目」用于显式补齐（含新项目）。
 4. git 拉取**确有更新**时自动对已索引项目 `codegraph sync`；无更新/跳过时不执行。
 5. 项目行显示 codegraph 状态（已索引 / 未索引 / 不可用）与「索引更新」时间；可按需查看单项目统计。
 6. 不引入新依赖；`pnpm test`、`pnpm typecheck`、`pnpm build` 通过。
@@ -224,5 +225,5 @@ export interface CodegraphStats { initialized: boolean; fileCount: number; nodeC
 1. **MCP 接入范围**：全写。执行 `codegraph install --yes`（⇒ `--location=global --target=auto`），因为本项目同时存在 codex 等桥接模式。
 2. **安装方式**：平台脚本与 npm 两种都提供，默认平台脚本。
 3. **同步触发**：仅当本次 pull 确为 `updated` 才 sync。
-4. **自动初始化范围**：新项目自动 init + 提供「初始化全部未索引项目」批量按钮。
+4. **自动初始化范围**：不做自动 init；仅保留「初始化全部未索引项目」显式批量按钮。
 5. **CLI 安装后动作**：自动接 MCP（同一作业内）。

@@ -172,7 +172,6 @@ export async function addProjects(
   body: unknown,
   runner: GitRunner = run,
   onStep?: (info: { id: string; name: string }) => void,
-  codegraph?: CodegraphHook,
 ): Promise<ProjectsView> {
   const raw = body as { projects?: unknown };
   const items = Array.isArray(raw?.projects) ? raw.projects : [];
@@ -233,20 +232,6 @@ export async function addProjects(
         throw new HttpError(400, err instanceof Error ? err.message : String(err));
       }
       op?.commitRollback(rollbackKey);
-      if (codegraph?.available) {
-        // Indexing is best-effort: a failure must not roll back a clone that
-        // succeeded, so it only logs and the row shows "未索引" for a retry.
-        try {
-          if (!(await projectIndexInfo(dir)).indexed) {
-            const indexed = await codegraph.init(dir);
-            if (!indexed.ok) {
-              log.warn('workspace', 'codegraph-init-failed', { id: entry.id, detail: indexed.detail });
-            }
-          }
-        } catch (err) {
-          log.warn('workspace', 'codegraph-init-failed', { id: entry.id, err: String(err) });
-        }
-      }
     }
     await store.flush();
   });

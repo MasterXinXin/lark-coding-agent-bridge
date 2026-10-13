@@ -77,34 +77,6 @@ function recordingHook(available = true): {
 const runner = (): GitRunner => createGitRunner();
 
 describe('codegraph hook wiring', { timeout: 60_000 }, () => {
-  it('initialises a freshly cloned project once', async () => {
-    const origin = await makeOrigin(rootDir);
-    const { hook, initDirs } = recordingHook();
-    await addProjects(
-      'claude',
-      rootDir,
-      { projects: [{ repoUrl: origin, name: 'x' }] },
-      runner(),
-      undefined,
-      hook,
-    );
-    expect(initDirs).toEqual([join(workspace, 'x')]);
-  });
-
-  it('skips init when codegraph is unavailable', async () => {
-    const origin = await makeOrigin(rootDir);
-    const { hook, initDirs } = recordingHook(false);
-    await addProjects(
-      'claude',
-      rootDir,
-      { projects: [{ repoUrl: origin, name: 'x' }] },
-      runner(),
-      undefined,
-      hook,
-    );
-    expect(initDirs).toEqual([]);
-  });
-
   it('syncs only when a pull actually updated and the project is indexed', async () => {
     const origin = await makeOrigin(rootDir);
     const { hook, syncDirs } = recordingHook();
@@ -113,8 +85,6 @@ describe('codegraph hook wiring', { timeout: 60_000 }, () => {
       rootDir,
       { projects: [{ repoUrl: origin, name: 'x' }] },
       runner(),
-      undefined,
-      hook,
     );
     // Not yet indexed -> an up-to-date pull must not sync.
     await pullProjects('claude', rootDir, {}, runner(), undefined, 'manual', hook);

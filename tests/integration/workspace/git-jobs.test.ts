@@ -122,6 +122,31 @@ describe('git jobs', { timeout: 60_000 }, () => {
     expect(snap.error).toBeTruthy();
   });
 
+  it('does not index or probe codegraph when adding a project', async () => {
+    const origin = await makeOrigin(rootDir);
+    const registry = new JobRegistry();
+    const calls: string[][] = [];
+    const codegraphRunner: CodegraphRunner = async (args) => {
+      calls.push(args);
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    const { id } = startAddJob(
+      'claude',
+      rootDir,
+      { projects: [{ repoUrl: origin, name: 'x' }] },
+      {
+        registry,
+        runner: makeRecording([]),
+        codegraphRunner,
+        codegraphResolve: async () => '/fake/codegraph',
+      },
+    );
+    const snap = await waitForJob(registry, id);
+    expect(snap.status).toBe('succeeded');
+    // First pulls only clone: `add` neither probes nor indexes codegraph.
+    expect(calls).toEqual([]);
+  });
+
   it('pulls an added project and records its step', async () => {
     const origin = await makeOrigin(rootDir);
     const registry = new JobRegistry();
@@ -227,20 +252,13 @@ describe('git jobs', { timeout: 60_000 }, () => {
       if (args[0] === 'clone') opts?.onOutput?.(progress);
       return { code: 0, stdout: '', stderr: '' };
     };
-    const codegraph: CodegraphHook = {
-      available: false,
-      init: async () => ({ ok: true }),
-      sync: async () => ({ ok: true }),
-      installCli: async () => ({ ok: true }),
-      wireMcp: async () => ({ ok: true }),
-    };
 
     const registry = new JobRegistry();
     const { id } = startAddJob(
       'claude',
       rootDir,
       { projects: [{ repoUrl: 'https://example.invalid/x.git', name: 'x' }] },
-      { registry, runner, codegraph },
+      { registry, runner },
     );
     const snap = await waitForJob(registry, id);
     expect(snap.status).toBe('succeeded');

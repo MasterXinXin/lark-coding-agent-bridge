@@ -117,18 +117,22 @@ function beginJob(
             : {}),
         },
         async () => {
+          // `add` only clones; it neither probes nor indexes codegraph, so skip
+          // the CLI detection the hook would otherwise perform.
           const codegraph =
             deps.codegraph ??
-            (await createCodegraphHook({
-              ...(deps.codegraphRunner ? { runner: deps.codegraphRunner } : {}),
-              ...(deps.commandRunner ? { commandRunner: deps.commandRunner } : {}),
-              ...(deps.codegraphBin ? { bin: deps.codegraphBin } : {}),
-              ...(deps.codegraphResolve ? { resolve: deps.codegraphResolve } : {}),
-              onOutput: (chunk) => writer.push(chunk),
-            }).catch((err) => {
-              log.fail('workspace', err, { step: 'codegraph-hook', jobId });
-              return undefined;
-            }));
+            (kind === 'add'
+              ? undefined
+              : await createCodegraphHook({
+                  ...(deps.codegraphRunner ? { runner: deps.codegraphRunner } : {}),
+                  ...(deps.commandRunner ? { commandRunner: deps.commandRunner } : {}),
+                  ...(deps.codegraphBin ? { bin: deps.codegraphBin } : {}),
+                  ...(deps.codegraphResolve ? { resolve: deps.codegraphResolve } : {}),
+                  onOutput: (chunk) => writer.push(chunk),
+                }).catch((err) => {
+                  log.fail('workspace', err, { step: 'codegraph-hook', jobId });
+                  return undefined;
+                }));
           const result = await work(runner, onStep, codegraph);
           writer.flush();
           registry.finish(jobId, result);
@@ -155,8 +159,8 @@ export function startAddJob(
   body: unknown,
   deps: StartJobDeps = {},
 ): { id: string } {
-  return beginJob('add', addLabel(body), { profile, rootDir }, deps, (runner, onStep, codegraph) =>
-    addProjects(profile, rootDir, body, runner, onStep, codegraph),
+  return beginJob('add', addLabel(body), { profile, rootDir }, deps, (runner, onStep) =>
+    addProjects(profile, rootDir, body, runner, onStep),
   );
 }
 
