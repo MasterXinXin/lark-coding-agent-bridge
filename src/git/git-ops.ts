@@ -92,6 +92,59 @@ export async function currentBranch(run: GitRunner, dir: string): Promise<string
 }
 
 /**
+ * Remote branch names via `git ls-remote --heads <repoUrl>`. Throws on failure
+ * (network/permission) so the caller can degrade to free-text input.
+ */
+export async function listRemoteBranches(
+  run: GitRunner,
+  repoUrl: string,
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<string[]> {
+  const r = await run(['ls-remote', '--heads', '--', repoUrl], {
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    ...(opts.env ? { env: opts.env } : {}),
+    timeoutMs: 60_000,
+  });
+  if (r.code !== 0) throw new Error(`git ls-remote 失败：${failureDetail(r)}`);
+  const names: string[] = [];
+  for (const line of r.stdout.split(/\r?\n/)) {
+    const m = /^[0-9a-f]+\s+refs\/heads\/(.+)$/.exec(line.trim());
+    if (m) names.push(m[1]);
+  }
+  return names;
+}
+
+/** Local branch names; a non-repo/missing dir degrades to an empty list. */
+export async function listLocalBranches(run: GitRunner, dir: string): Promise<string[]> {
+  const r = await run(['branch', '--format=%(refname:short)'], { cwd: dir });
+  if (r.code !== 0) return [];
+  return r.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+/** `fetch --prune` then `checkout <branch>`; throws with a short git detail. */
+export async function switchBranch(
+  run: GitRunner,
+  dir: string,
+  branch: string,
+  opts: { env?: NodeJS.ProcessEnv } = {},
+): Promise<void> {
+  const fetch = await run(['fetch', '--prune', '--progress'], {
+    cwd: dir,
+    ...(opts.env ? { env: opts.env } : {}),
+    timeoutMs: 120_000,
+  });
+  if (fetch.code !== 0) throw new Error(`git fetch 失败：${failureDetail(fetch)}`);
+  const checkout = await run(['checkout', branch], {
+    cwd: dir,
+    ...(opts.env ? { env: opts.env } : {}),
+  });
+  if (checkout.code !== 0) throw new Error(`git checkout 失败：${failureDetail(checkout)}`);
+}
+
+/**
  * Reduce a remote URL to `host/path` for equality checks: drop the scheme or
  * `user@`, the `.git` suffix, and a trailing slash; lowercase the rest.
  */

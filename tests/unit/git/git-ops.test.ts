@@ -6,10 +6,13 @@ import {
   currentBranch,
   ensureCheckout,
   isGitRepo,
+  listLocalBranches,
+  listRemoteBranches,
   normalizeRemote,
   pullRepo,
   remoteUrl,
   repoStatus,
+  switchBranch,
   type GitResult,
   type GitRunner,
 } from '../../../src/git/git-ops';
@@ -123,5 +126,50 @@ describe('ensureCheckout', () => {
     await writeFile(join(dir, 'file.txt'), 'x', 'utf8');
     const run = fakeRunner({ 'rev-parse --is-inside-work-tree': { code: 128 } });
     await expect(ensureCheckout(run, { repoUrl: 'https://x/y.git', dir })).rejects.toThrow(/非空/);
+  });
+});
+
+describe('git-ops branch helpers', () => {
+  it('parses remote heads from ls-remote', async () => {
+    const sha = 'a'.repeat(40);
+    const run = fakeRunner({
+      'ls-remote --heads -- https://x/y.git': {
+        stdout: `${sha}\trefs/heads/main\n${sha}\trefs/heads/release\n`,
+      },
+    });
+    expect(await listRemoteBranches(run, 'https://x/y.git')).toEqual(['main', 'release']);
+  });
+
+  it('throws a short detail when ls-remote fails', async () => {
+    const run = fakeRunner({
+      'ls-remote --heads -- https://x/y.git': { code: 128, stderr: 'fatal: could not read\n' },
+    });
+    await expect(listRemoteBranches(run, 'https://x/y.git')).rejects.toThrow(/git ls-remote 失败/);
+  });
+
+  it('lists local branches and degrades to empty for a non-repo', async () => {
+    const run = fakeRunner({
+      'branch --format=%(refname:short)': { stdout: 'main\nrelease\n\n' },
+    });
+    expect(await listLocalBranches(run, '/repo')).toEqual(['main', 'release']);
+    expect(await listLocalBranches(fakeRunner({}), '/repo')).toEqual([]);
+  });
+
+  it('fetches then checks out the target branch', async () => {
+    const calls: string[][] = [];
+    const run: GitRunner = async (args) => {
+      calls.push(args);
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    await switchBranch(run, '/repo', 'release');
+    expect(calls).toEqual([['fetch', '--prune', '--progress'], ['checkout', 'release']]);
+  });
+
+  it('throws after a failed checkout without hiding the git detail', async () => {
+    const run: GitRunner = async (args) =>
+      args[0] === 'checkout'
+        ? { code: 1, stdout: '', stderr: "error: pathspec 'x' did not match\n" }
+        : { code: 0, stdout: '', stderr: '' };
+    await expect(switchBranch(run, '/repo', 'x')).rejects.toThrow(/git checkout 失败/);
   });
 });
