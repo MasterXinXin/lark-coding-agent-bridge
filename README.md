@@ -241,7 +241,7 @@ If a profile was created with the wrong agent kind, stop or unregister any match
 | `/ws schedule on\|off\|<minutes>` | Enable / disable scheduled pulls, or set the interval (5–1440 min) |
 | `/project add <url> [branch]` | Add a project manually and check it out |
 | `/project rm <name>` | Remove the project record (**without** deleting the on-disk directory) |
-| `/project branch <name> <branch>` | Change a project's tracked branch |
+| `/project branch <name> <branch>` | Switch a project's checkout to another branch |
 | `/resume` | Resume compatible history for the same agent, working directory, and permission mode |
 | `/status` | Show profile, agent, working directory, session, lark-cli identity, and run state |
 | `/config` | Adjust presentation preferences, access settings, and lark-cli identity policy (workspace / git projects live in the console) |
@@ -300,6 +300,7 @@ The management console (the `http://127.0.0.1:<port>/?token=…` URL the bridge 
 - **Add from an account**: once a Git account is configured you can list its remote repositories and add several at once with a per-repo branch; you can also paste a repository URL manually.
 - **Live progress**: add (clone) and pull run in the background while a progress dialog streams git's output (progress, `remote:` messages) and phases. Closing the dialog leaves the task running; reloading the page reconnects you to that task's progress view. A **Cancel task** button in the dialog stops it in place and rolls back the half-finished work.
 - **Remove a project**: by default only the record is removed; the confirmation dialog offers "remove and delete the directory" to delete the local checkout too (a dirty tree / missing directory / non-git repo shows a red warning but can still be deleted).
+- **Switch branch**: a project's branch is a dropdown of the repo's branches (remote heads included; it degrades to manual input when listing fails). Selecting one immediately fetches and checks out that branch, persists it, and re-syncs the index for an already-indexed project. A dirty tree refuses the switch and keeps the old branch. Scheduled/manual pulls also target the configured branch (`fetch-only` never moves the tree).
 - **Scheduled pulls**: enable a profile-level schedule (interval 5–1440 min, strategy `ff-only` / `reset-hard`). The supervisor drives it, so offline profiles still pull; a locally dirty tree is skipped and recorded, never overwritten. The last scheduled run time is recovered from the pull history, so a bridge restart keeps the interval and does not pull immediately.
 - **Pull history**: every pull (scheduled or manual) is appended to `profiles/<profile>/pull-history.jsonl`; the console shows recent records and notifies the owner on failures (optional).
 - **CodeGraph index**: detects/installs the codegraph CLI (official script or npm), wires the codegraph MCP for local agents, indexes projects on demand (no automatic index on first clone), and re-syncs an already-indexed project after a pull that changed files. Each project row shows its index state.
