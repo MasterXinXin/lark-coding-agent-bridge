@@ -6,6 +6,8 @@ import {
   createDefaultProfileConfig,
   normalizeProfileConfig,
   normalizeRole,
+  ROLE_PROMPT_MAX_BYTES,
+  truncateUtf8,
 } from '../../../src/config/profile-schema';
 import {
   createRootConfig,
@@ -19,6 +21,13 @@ afterEach(async () => {
 });
 
 const app = { id: 'cli_test', secret: '${APP_SECRET}', tenant: 'feishu' as const };
+
+describe('truncateUtf8', () => {
+  it('never splits a code point at the byte cap', () => {
+    expect(truncateUtf8('abc', 10)).toBe('abc');
+    expect(truncateUtf8('你你', 4)).toBe('你');
+  });
+});
 
 describe('normalizeRole', () => {
   it('trims the prompt and drops an empty role with no whitelists', () => {
@@ -43,6 +52,14 @@ describe('normalizeRole', () => {
       prompt: 'x',
       skillsEnabled: ['a', 'b'],
     });
+  });
+
+  it('clamps an oversized prompt to the byte cap', () => {
+    const huge = '你'.repeat(ROLE_PROMPT_MAX_BYTES);
+    const out = normalizeRole({ prompt: huge });
+    expect(out).toBeDefined();
+    expect(Buffer.byteLength(out!.prompt, 'utf8')).toBeLessThanOrEqual(ROLE_PROMPT_MAX_BYTES);
+    expect(out!.prompt.length).toBeGreaterThan(0);
   });
 });
 

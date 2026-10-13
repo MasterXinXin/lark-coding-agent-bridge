@@ -124,8 +124,22 @@ export interface RoleConfig {
   skillsEnabled?: string[];
 }
 
-/** Upper bound for the role prompt, enforced on save. */
+/** Upper bound for the role prompt; `normalizeRole` clamps to it on every load/save. */
 export const ROLE_PROMPT_MAX_BYTES = 64 * 1024;
+
+/** Cap a string at `maxBytes` of UTF-8 without splitting a code point. */
+export function truncateUtf8(input: string, maxBytes: number): string {
+  if (Buffer.byteLength(input, 'utf8') <= maxBytes) return input;
+  let bytes = 0;
+  let out = '';
+  for (const ch of input) {
+    const size = Buffer.byteLength(ch, 'utf8');
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    out += ch;
+  }
+  return out;
+}
 
 export type LarkCliIdentityPreset = 'bot-only' | 'user-default';
 
@@ -491,7 +505,10 @@ function normalizeMeeting(input: unknown): MeetingConfig {
 export function normalizeRole(input: unknown): RoleConfig | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
   const raw = input as { prompt?: unknown; mcpEnabled?: unknown; skillsEnabled?: unknown };
-  const prompt = typeof raw.prompt === 'string' ? raw.prompt.trim() : '';
+  const prompt = truncateUtf8(
+    typeof raw.prompt === 'string' ? raw.prompt.trim() : '',
+    ROLE_PROMPT_MAX_BYTES,
+  );
   const mcpEnabled = normalizeNameList(raw.mcpEnabled);
   const skillsEnabled = normalizeNameList(raw.skillsEnabled);
   if (!prompt && !mcpEnabled && !skillsEnabled) return undefined;
