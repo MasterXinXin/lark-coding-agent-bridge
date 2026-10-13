@@ -321,4 +321,23 @@ describe('buildRoleCatalog', () => {
     expect(view.mcp.items).toEqual([{ name: 'a', transport: 'stdio', source: 'opencode.json' }]);
     expect(view.skills.available).toBe(false);
   });
+
+  it('degrades instead of throwing when path resolution fails', async () => {
+    const dir = await tempDir();
+    const state: MutableProfileState = {
+      configPath: join(dir, 'config.json'),
+      profile: 'p',
+      cfg: {} as never,
+      profileConfig: {
+        agentKind: 'claude',
+        get workspaces(): never {
+          throw new Error('boom');
+        },
+      } as never,
+    };
+    const view = await buildRoleCatalog(state);
+    expect(view.mcp).toEqual({ available: false, error: 'boom', items: [] });
+    expect(view.skills).toEqual({ available: false, error: 'boom', items: [] });
+    expect(view.capabilities).toEqual({ mcp: 'control', skills: 'readonly' });
+  });
 });
