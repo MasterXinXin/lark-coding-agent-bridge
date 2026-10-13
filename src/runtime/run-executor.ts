@@ -103,6 +103,7 @@ export class RunExecutor {
       images: input.images,
       sandbox: input.policy.sandbox,
       permissionMode: input.policy.permissionMode,
+      rolePrompt: input.policy.rolePrompt,
       stopGraceMs: input.stopGraceMs,
       // opencode uses scopeId to cache its per-session SSE driver so
       // wake-ups (oh-my-openagent background-task notifications) land back

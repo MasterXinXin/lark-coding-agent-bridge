@@ -35,6 +35,29 @@ describe('RunExecutor policy runtime options', () => {
 
     await collect(execution.subscribe());
   });
+
+  it('forwards the policy role prompt into each agent run', async () => {
+    const agent = new FakeAgentAdapter({
+      events: [{ type: 'done', terminationReason: 'normal' }],
+    });
+    const executor = new RunExecutor({
+      agent,
+      pool: new ProcessPool(() => 1),
+      activeRuns: new ActiveRuns(),
+      createRunId: () => 'run-role',
+      now: () => 1000,
+      postDoneExitGraceMs: 10,
+    });
+
+    const execution = await executor.submit({
+      scopeId: 'scope-role',
+      policy: policy({ rolePrompt: '你是财务助手' }),
+    });
+
+    expect(agent.runOptions[0]).toMatchObject({ runId: 'run-role', rolePrompt: '你是财务助手' });
+
+    await collect(execution.subscribe());
+  });
 });
 
 function policy(overrides: Partial<RunPolicyAllow> = {}): RunPolicyAllow {
