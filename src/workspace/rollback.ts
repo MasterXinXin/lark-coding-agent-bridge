@@ -2,6 +2,7 @@ import { rm } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { resolveAppPaths } from '../config/app-paths';
 import { log } from '../core/logger';
+import { createGitRunner } from '../git/git-ops';
 import { createCodegraphRunner } from './codegraph';
 import type { RollbackDescriptor } from './operation-context';
 import { ProjectStore } from './projects';
@@ -22,6 +23,8 @@ export interface RollbackDeps {
   ) => Promise<void>;
   /** Release a stale codegraph index lock; injectable for tests. */
   unlock?: (dir: string) => Promise<void>;
+  /** Best-effort `git checkout` back to a branch; injectable for tests. */
+  switchBack?: (dir: string, branch: string) => Promise<void>;
 }
 
 /** Absolute target, or undefined when it escapes the workspace / is the root. */
@@ -68,6 +71,19 @@ export async function executeRollback(
     return;
   }
 
+  if (descriptor.kind === 'branch-switch') {
+    if (!descriptor.previousBranch) return;
+    const switchBack = deps.switchBack ?? defaultSwitchBack;
+    await switchBack(descriptor.dir, descriptor.previousBranch).catch((err) =>
+      log.warn('workspace', 'rollback-branch-switch-failed', {
+        dir: descriptor.dir,
+        branch: descriptor.previousBranch,
+        err: String(err),
+      }),
+    );
+    return;
+  }
+
   const unlock = deps.unlock ?? defaultUnlock;
   await unlock(descriptor.dir).catch((err) =>
     log.warn('workspace', 'rollback-codegraph-sync-failed', {
@@ -92,4 +108,11 @@ async function removeProjectRecord(
 async function defaultUnlock(dir: string): Promise<void> {
   const runner = createCodegraphRunner();
   await runner(['unlock', dir], { timeoutMs: 30_000 });
+}
+
+/** Best-effort `git checkout` that undoes a cancelled branch switch. */
+async function defaultSwitchBack(dir: string, branch: string): Promise<void> {
+  const runner = createGitRunner();
+  const r = await runner(['checkout', branch], { cwd: dir });
+  if (r.code !== 0) throw new Error('git checkout 失败');
 }

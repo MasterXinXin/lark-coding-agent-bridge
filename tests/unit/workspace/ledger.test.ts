@@ -6,6 +6,7 @@ import {
   ledgerDir,
   ledgerPath,
   listLedgerFiles,
+  normalizeRollback,
   readLedger,
   removeLedger,
   writeLedger,
@@ -91,5 +92,12 @@ describe('ledger', () => {
     expect(await readdir(ledgerDir(rootDir))).toContain('55.json');
     await removeLedger(rootDir, 55);
     expect(await readdir(ledgerDir(rootDir))).not.toContain('55.json');
+  });
+
+  it('normalizes a branch-switch rollback and rejects an incomplete one', () => {
+    expect(
+      normalizeRollback({ kind: 'branch-switch', dir: '/ws/x', previousBranch: 'main' }),
+    ).toEqual({ kind: 'branch-switch', dir: '/ws/x', previousBranch: 'main' });
+    expect(normalizeRollback({ kind: 'branch-switch', dir: '/ws/x' })).toBeUndefined();
   });
 });

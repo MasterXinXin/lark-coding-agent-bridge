@@ -102,4 +102,23 @@ describe('executeRollback', () => {
     expect(unlock).toHaveBeenCalledWith(dir);
     expect(await exists(join(dir, '.codegraph'))).toBe(true);
   });
+
+  it('switches back to the previous branch on cancel', async () => {
+    const dir = join(workspaceDir, 'proj');
+    await mkdir(dir, { recursive: true });
+    const switchBack = vi.fn(async () => {});
+
+    await executeRollback({ kind: 'branch-switch', dir, previousBranch: 'main' }, { switchBack });
+
+    expect(switchBack).toHaveBeenCalledWith(dir, 'main');
+  });
+
+  it('does nothing for a branch-switch with no previous branch', async () => {
+    const dir = join(workspaceDir, 'proj');
+    const switchBack = vi.fn(async () => {});
+
+    await executeRollback({ kind: 'branch-switch', dir, previousBranch: '' }, { switchBack });
+
+    expect(switchBack).not.toHaveBeenCalled();
+  });
 });

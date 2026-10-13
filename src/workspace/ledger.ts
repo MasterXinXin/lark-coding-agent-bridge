@@ -145,6 +145,9 @@ export function normalizeRollback(raw: unknown): RollbackDescriptor | undefined 
   if (!dir) return undefined;
   if (r.kind === 'codegraph-init') return { kind: 'codegraph-init', dir };
   if (r.kind === 'codegraph-sync') return { kind: 'codegraph-sync', dir };
+  if (r.kind === 'branch-switch' && typeof r.previousBranch === 'string') {
+    return { kind: 'branch-switch', dir, previousBranch: r.previousBranch };
+  }
   if (
     r.kind === 'add-checkout' &&
     typeof r.profile === 'string' &&

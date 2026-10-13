@@ -20,7 +20,8 @@ export type RollbackDescriptor =
       rootDir?: string;
     }
   | { kind: 'codegraph-init'; dir: string }
-  | { kind: 'codegraph-sync'; dir: string };
+  | { kind: 'codegraph-sync'; dir: string }
+  | { kind: 'branch-switch'; dir: string; previousBranch: string };
 
 export interface OperationMeta {
   /** Job id, or a synthetic id for scheduler ticks. */
