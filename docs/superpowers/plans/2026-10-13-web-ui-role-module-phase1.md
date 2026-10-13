@@ -688,14 +688,14 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDefaultProfileConfig, ROLE_PROMPT_MAX_BYTES } from '../../../src/config/profile-schema';
+import { createDefaultProfileConfig, ROLE_PROMPT_MAX_BYTES, truncateUtf8 } from '../../../src/config/profile-schema';
 import {
   createRootConfig,
   loadRootConfig,
   runtimeProfileConfig,
   saveRootConfig,
 } from '../../../src/config/profile-store';
-import { buildRoleView, saveRoleConfig, truncateUtf8 } from '../../../src/ui/role-api';
+import { buildRoleView, saveRoleConfig } from '../../../src/ui/role-api';
 
 const cleanups: string[] = [];
 afterEach(async () => {
@@ -812,6 +812,7 @@ import {
 import type { MutableProfileState } from '../config/config-ops';
 import {
   ROLE_PROMPT_MAX_BYTES,
+  truncateUtf8,
   type AgentKind,
   type RoleConfig,
 } from '../config/profile-schema';
@@ -915,23 +916,9 @@ function parseRoleBody(body: unknown): RoleConfig | undefined {
   const prompt = truncateUtf8((raw.prompt ?? '').trim(), ROLE_PROMPT_MAX_BYTES);
   return prompt ? { prompt } : undefined;
 }
-
-/** Cap a string at `maxBytes` of UTF-8 without splitting a code point. */
-export function truncateUtf8(input: string, maxBytes: number): string {
-  if (Buffer.byteLength(input, 'utf8') <= maxBytes) return input;
-  let bytes = 0;
-  let out = '';
-  for (const ch of input) {
-    const size = Buffer.byteLength(ch, 'utf8');
-    if (bytes + size > maxBytes) break;
-    bytes += size;
-    out += ch;
-  }
-  return out;
-}
 ```
 
-> `truncateUtf8` is exported only so the unit test can pin the code-point boundary; nothing else imports it.
+> `truncateUtf8` is imported from `../config/profile-schema` (Task 1) — do not define a second copy here.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
