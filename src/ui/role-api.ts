@@ -5,6 +5,7 @@ import {
   type AgentCapability,
   type PromptInjectionMode,
 } from '../agent/capability';
+import { roleScope, type RoleScopeCapability } from '../agent/role-catalog';
 import type { MutableProfileState } from '../config/config-ops';
 import {
   ROLE_PROMPT_MAX_BYTES,
@@ -20,8 +21,6 @@ import {
 } from '../config/profile-store';
 import { HttpError } from './http';
 
-export type RoleScopeCapability = 'control' | 'readonly' | 'none';
-
 export interface RoleView {
   profile: string;
   agentKind: AgentKind;
@@ -32,16 +31,6 @@ export interface RoleView {
   capabilities: { mcp: RoleScopeCapability; skills: RoleScopeCapability };
   live: boolean;
 }
-
-/**
- * Per-bridge role scope control level. Phase 2 uses it to decide whether the
- * MCP / skill cards are switchable. Role injection itself works on all three.
- */
-const ROLE_SCOPE: Record<AgentKind, { mcp: RoleScopeCapability; skills: RoleScopeCapability }> = {
-  claude: { mcp: 'control', skills: 'readonly' },
-  codex: { mcp: 'readonly', skills: 'none' },
-  opencode: { mcp: 'control', skills: 'control' },
-};
 
 function capabilityFor(agentKind: AgentKind, state: MutableProfileState): AgentCapability {
   switch (agentKind) {
@@ -62,7 +51,7 @@ export function buildRoleView(state: MutableProfileState, live: boolean): RoleVi
     agentKind,
     prompt: state.profileConfig.role?.prompt ?? '',
     injection: capabilityFor(agentKind, state).promptInjection,
-    capabilities: ROLE_SCOPE[agentKind],
+    capabilities: roleScope(agentKind),
     live,
   };
 }
