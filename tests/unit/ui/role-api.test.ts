@@ -1,0 +1,108 @@
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createDefaultProfileConfig, ROLE_PROMPT_MAX_BYTES, truncateUtf8 } from '../../../src/config/profile-schema';
+import {
+  createRootConfig,
+  loadRootConfig,
+  runtimeProfileConfig,
+  saveRootConfig,
+} from '../../../src/config/profile-store';
+import { buildRoleView, saveRoleConfig } from '../../../src/ui/role-api';
+
+const cleanups: string[] = [];
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+});
+
+const app = { id: 'cli_test', secret: 's', tenant: 'feishu' as const };
+
+async function createState(agentKind: 'claude' | 'codex' = 'claude') {
+  const rootDir = await mkdtemp(join(tmpdir(), 'bridge-role-api-'));
+  cleanups.push(rootDir);
+  await mkdir(join(rootDir, 'profiles', 'claude'), { recursive: true });
+  const configPath = join(rootDir, 'config.json');
+  await saveRootConfig(
+    createRootConfig(
+      'claude',
+      createDefaultProfileConfig({
+        agentKind,
+        accounts: { app },
+        ...(agentKind === 'codex' ? { codex: { binaryPath: '/usr/local/bin/codex' } } : {}),
+      }),
+    ),
+    configPath,
+  );
+  const root = (await loadRootConfig(configPath))!;
+  const state = {
+    configPath,
+    profile: 'claude',
+    cfg: runtimeProfileConfig(root, 'claude'),
+    profileConfig: root.profiles.claude!,
+  };
+  return { configPath, state };
+}
+
+describe('buildRoleView', () => {
+  it('reports agent kind, injection mode, and an empty prompt for a fresh profile', async () => {
+    const { state } = await createState('claude');
+    expect(buildRoleView(state, true)).toMatchObject({
+      profile: 'claude',
+      agentKind: 'claude',
+      prompt: '',
+      injection: 'append-system-prompt',
+      capabilities: { mcp: 'control', skills: 'readonly' },
+      live: true,
+    });
+  });
+});
+
+describe('saveRoleConfig', () => {
+  it('trims, persists, and refreshes in-memory state', async () => {
+    const { configPath, state } = await createState();
+
+    const view = await saveRoleConfig(state, { prompt: '  你是财务助手  ' }, true);
+
+    expect(view.prompt).toBe('你是财务助手');
+    expect(state.profileConfig.role?.prompt).toBe('你是财务助手');
+    const disk = (await loadRootConfig(configPath))!;
+    expect(disk.profiles.claude!.role?.prompt).toBe('你是财务助手');
+  });
+
+  it('removes the role when the prompt is blank', async () => {
+    const { configPath, state } = await createState();
+    await saveRoleConfig(state, { prompt: '你是助手' });
+    expect(state.profileConfig.role).toBeDefined();
+
+    const view = await saveRoleConfig(state, { prompt: '   ' });
+
+    expect(view.prompt).toBe('');
+    expect(state.profileConfig.role).toBeUndefined();
+    expect((await loadRootConfig(configPath))!.profiles.claude!.role).toBeUndefined();
+  });
+
+  it('rejects a non-string prompt with a 400', async () => {
+    const { state } = await createState();
+    await expect(saveRoleConfig(state, { prompt: 42 })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('truncates an over-long prompt at the byte cap', async () => {
+    const { state } = await createState();
+    const huge = '你'.repeat(ROLE_PROMPT_MAX_BYTES); // 3 bytes each → far over
+
+    const view = await saveRoleConfig(state, { prompt: huge });
+
+    expect(Buffer.byteLength(view.prompt, 'utf8')).toBeLessThanOrEqual(ROLE_PROMPT_MAX_BYTES);
+    expect(view.prompt.length).toBeGreaterThan(0);
+  });
+});
+
+describe('truncateUtf8', () => {
+  it('keeps the string when within budget and never splits a code point', () => {
+    expect(truncateUtf8('abc', 10)).toBe('abc');
+    const out = truncateUtf8('你你', 4); // one 3-byte char fits, the second does not
+    expect(out).toBe('你');
+    expect(Buffer.byteLength(out, 'utf8')).toBeLessThanOrEqual(4);
+  });
+});
