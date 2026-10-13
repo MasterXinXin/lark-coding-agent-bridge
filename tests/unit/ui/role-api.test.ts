@@ -18,7 +18,7 @@ afterEach(async () => {
 
 const app = { id: 'cli_test', secret: 's', tenant: 'feishu' as const };
 
-async function createState(agentKind: 'claude' | 'codex' = 'claude') {
+async function createState(agentKind: 'claude' | 'codex' | 'opencode' = 'claude') {
   const rootDir = await mkdtemp(join(tmpdir(), 'bridge-role-api-'));
   cleanups.push(rootDir);
   await mkdir(join(rootDir, 'profiles', 'claude'), { recursive: true });
@@ -54,6 +54,25 @@ describe('buildRoleView', () => {
       injection: 'append-system-prompt',
       capabilities: { mcp: 'control', skills: 'readonly' },
       live: true,
+    });
+  });
+
+  it('reports the codex injection mode and read-only scope', async () => {
+    const { state } = await createState('codex');
+    expect(buildRoleView(state, false)).toMatchObject({
+      agentKind: 'codex',
+      injection: 'stdin-prefix',
+      capabilities: { mcp: 'readonly', skills: 'none' },
+      live: false,
+    });
+  });
+
+  it('reports the opencode injection mode and full scope', async () => {
+    const { state } = await createState('opencode');
+    expect(buildRoleView(state, true)).toMatchObject({
+      agentKind: 'opencode',
+      injection: 'prompt-body-system',
+      capabilities: { mcp: 'control', skills: 'control' },
     });
   });
 });
@@ -95,6 +114,49 @@ describe('saveRoleConfig', () => {
 
     expect(Buffer.byteLength(view.prompt, 'utf8')).toBeLessThanOrEqual(ROLE_PROMPT_MAX_BYTES);
     expect(view.prompt.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a non-object body with a 400', async () => {
+    const { state } = await createState();
+    await expect(saveRoleConfig(state, null)).rejects.toMatchObject({ status: 400 });
+    await expect(saveRoleConfig(state, [1, 2])).rejects.toMatchObject({ status: 400 });
+    await expect(saveRoleConfig(state, 'nope')).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('404s when the profile is not in the config', async () => {
+    const { state } = await createState();
+    const missing = { ...state, profile: 'ghost' };
+    await expect(saveRoleConfig(missing, { prompt: 'x' })).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('preserves phase-2 whitelist fields across a save', async () => {
+    const { configPath, state } = await createState();
+    const seeded = (await loadRootConfig(configPath))!;
+    seeded.profiles.claude!.role = { prompt: '旧', mcpEnabled: ['mcp-a'] };
+    await saveRootConfig(seeded, configPath);
+    state.profileConfig = (await loadRootConfig(configPath))!.profiles.claude!;
+
+    const view = await saveRoleConfig(state, { prompt: '新' });
+
+    expect(view.prompt).toBe('新');
+    expect(state.profileConfig.role).toEqual({ prompt: '新', mcpEnabled: ['mcp-a'] });
+    expect((await loadRootConfig(configPath))!.profiles.claude!.role).toEqual({
+      prompt: '新',
+      mcpEnabled: ['mcp-a'],
+    });
+  });
+
+  it('clearing the prompt keeps whitelist fields', async () => {
+    const { configPath, state } = await createState();
+    const seeded = (await loadRootConfig(configPath))!;
+    seeded.profiles.claude!.role = { prompt: '旧', mcpEnabled: ['mcp-a'] };
+    await saveRootConfig(seeded, configPath);
+    state.profileConfig = (await loadRootConfig(configPath))!.profiles.claude!;
+
+    const view = await saveRoleConfig(state, { prompt: '   ' });
+
+    expect(view.prompt).toBe('');
+    expect(state.profileConfig.role).toEqual({ prompt: '', mcpEnabled: ['mcp-a'] });
   });
 });
 

@@ -45,12 +45,12 @@ const ROLE_SCOPE: Record<AgentKind, { mcp: RoleScopeCapability; skills: RoleScop
 
 function capabilityFor(agentKind: AgentKind, state: MutableProfileState): AgentCapability {
   switch (agentKind) {
+    case 'claude':
+      return claudeCapability(state.profileConfig);
     case 'codex':
       return codexCapability(state.profileConfig);
     case 'opencode':
       return opencodeCapability(state.profileConfig);
-    default:
-      return claudeCapability(state.profileConfig);
   }
 }
 
@@ -86,7 +86,19 @@ export async function saveRoleConfig(
       const profile = root.profiles[state.profile];
       if (!profile) throw new HttpError(404, `profile not found: ${state.profile}`);
       const next = { ...profile };
-      if (role) next.role = role;
+      const existing = profile.role;
+      const preserved = existing
+        ? {
+            ...(existing.mcpEnabled ? { mcpEnabled: existing.mcpEnabled } : {}),
+            ...(existing.skillsEnabled ? { skillsEnabled: existing.skillsEnabled } : {}),
+          }
+        : {};
+      const merged: RoleConfig | undefined = role
+        ? { ...preserved, prompt: role.prompt }
+        : Object.keys(preserved).length > 0
+          ? { prompt: '', ...preserved }
+          : undefined;
+      if (merged) next.role = merged;
       else delete next.role;
       root.profiles[state.profile] = next;
       await saveRootConfig(root, state.configPath);
