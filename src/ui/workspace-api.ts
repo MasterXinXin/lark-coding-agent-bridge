@@ -15,6 +15,7 @@ import {
   listRemoteBranches,
   repoStatus,
   pullRepo,
+  switchBranch,
   type GitRunner,
   type RepoStatus,
 } from '../git/git-ops';
@@ -377,6 +378,83 @@ export async function updateProjectBranch(
     await store.flush();
   });
   return projectsView(profile, rootDir);
+}
+
+/**
+ * Switch a project's checkout to `body.branch` and persist it. Refuses a dirty
+ * tree, registers a rollback to the previous branch, and re-syncs the codegraph
+ * index when the CLI is available and the project is indexed.
+ */
+export async function switchProjectBranch(
+  profile: string,
+  rootDir: string | undefined,
+  body: unknown,
+  runner: GitRunner = run,
+  onStep?: (info: { id: string; name: string }) => void,
+  codegraph?: CodegraphHook,
+): Promise<ProjectsView> {
+  const raw = body as { branch?: unknown };
+  const branch = typeof raw?.branch === 'string' ? raw.branch.trim() : '';
+  if (!branch) throw new HttpError(400, 'branch is required');
+  const id = readId(body);
+
+  const { workspaceDir, store } = await statePaths(profile, rootDir);
+  const entry = store.get(id);
+  if (!entry) throw new HttpError(404, `项目不存在：${id}`);
+  const dir = resolveProjectDir(workspaceDir, entry.localPath);
+  const usernames = await accountUsernames(rootDir);
+  const env = entry.accountId
+    ? await gitEnvForAccount(entry.accountId, hostStorePaths(rootDir), usernames.get(entry.accountId))
+    : undefined;
+  const projectRun = env ? withGitEnv(runner, env) : runner;
+
+  if (!(await isGitRepo(projectRun, dir).catch(() => false))) {
+    throw new HttpError(400, '目录不存在或不是 git 仓库，请先完成检出');
+  }
+  const status = await repoStatus(projectRun, dir);
+  const current = status.branch;
+
+  if (current === branch) {
+    if (entry.branch !== branch) await persistBranch(profile, rootDir, id, branch);
+    return projectsView(profile, rootDir);
+  }
+  if (status.dirty) throw new HttpError(400, '工作区有未提交改动，已取消切换');
+
+  onStep?.({ id, name: entry.name });
+  const op = currentOperation();
+  const rollbackKey = `branch-switch:${id}`;
+  op?.registerRollback(rollbackKey, { kind: 'branch-switch', dir, previousBranch: current ?? '' });
+  await switchBranch(projectRun, dir, branch);
+  op?.commitRollback(rollbackKey);
+
+  await persistBranch(profile, rootDir, id, branch);
+
+  if (codegraph?.available && (await projectIndexInfo(dir)).indexed) {
+    try {
+      const synced = await codegraph.sync(dir);
+      if (!synced.ok) log.warn('workspace', 'codegraph-sync-failed', { id, detail: synced.detail });
+    } catch (err) {
+      log.warn('workspace', 'codegraph-sync-failed', { id, err: String(err) });
+    }
+  }
+  return projectsView(profile, rootDir);
+}
+
+/** Persist just the tracked branch name, serialized behind the projects lock. */
+async function persistBranch(
+  profile: string,
+  rootDir: string | undefined,
+  id: string,
+  branch: string,
+): Promise<void> {
+  await withProjectStore(profile, rootDir, async (store) => {
+    try {
+      store.updateBranch(id, branch);
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : String(err));
+    }
+    await store.flush();
+  });
 }
 
 export async function setWorkspaceDir(

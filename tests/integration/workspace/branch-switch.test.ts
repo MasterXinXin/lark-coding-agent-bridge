@@ -111,4 +111,50 @@ describe('project branch switch', { timeout: 60_000 }, () => {
       status: 400,
     });
   });
+
+  it('switches the checkout, persists the branch, and syncs the index', async () => {
+    const origin = await makeOrigin(rootDir);
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'x' }] });
+    await mkdir(join(workspace, 'x', '.codegraph'), { recursive: true });
+    await writeFile(join(workspace, 'x', '.codegraph', 'codegraph.db'), 'x');
+    // A raw `.codegraph/` is untracked and would make the tree look dirty.
+    await ensureCodegraphExcluded(join(workspace, 'x'));
+    const { hook, syncDirs } = syncHook();
+    const id = (await projectsView('claude', rootDir)).projects[0]!.id;
+
+    await switchProjectBranch('claude', rootDir, { id, branch: 'release' }, undefined, undefined, hook);
+
+    const view = await projectsView('claude', rootDir);
+    expect(view.projects[0]!.branch).toBe('release');
+    expect(view.projects[0]!.status.branch).toBe('release');
+    expect(syncDirs).toEqual([join(workspace, 'x')]);
+  });
+
+  it('refuses to switch when the tree is dirty and keeps the branch', async () => {
+    const origin = await makeOrigin(rootDir);
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'x' }] });
+    await writeFile(join(workspace, 'x', 'wip.txt'), 'wip', 'utf8');
+    const id = (await projectsView('claude', rootDir)).projects[0]!.id;
+
+    await expect(switchProjectBranch('claude', rootDir, { id, branch: 'release' })).rejects.toThrow(
+      /未提交改动/,
+    );
+
+    const view = await projectsView('claude', rootDir);
+    expect(view.projects[0]!.branch).toBe('main');
+    expect(view.projects[0]!.status.branch).toBe('main');
+  });
+
+  it('is a no-op when the target already matches the current branch', async () => {
+    const origin = await makeOrigin(rootDir);
+    await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'x' }] });
+    await mkdir(join(workspace, 'x', '.codegraph'), { recursive: true });
+    await writeFile(join(workspace, 'x', '.codegraph', 'codegraph.db'), 'x');
+    const { hook, syncDirs } = syncHook();
+    const id = (await projectsView('claude', rootDir)).projects[0]!.id;
+
+    await switchProjectBranch('claude', rootDir, { id, branch: 'main' }, undefined, undefined, hook);
+
+    expect(syncDirs).toEqual([]);
+  });
 });

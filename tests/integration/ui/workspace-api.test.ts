@@ -19,7 +19,7 @@ import {
   resolveProjectDir,
   resolveProjectId,
   setWorkspaceDir,
-  updateProjectBranch,
+  switchProjectBranch,
 } from '../../../src/ui/workspace-api';
 import { ProjectStore } from '../../../src/workspace/projects';
 import { readPullRecords } from '../../../src/workspace/history';
@@ -125,12 +125,18 @@ describe('workspace-api', { timeout: 30_000 }, () => {
     ).rejects.toBeInstanceOf(HttpError);
   });
 
-  it('updates branch, sets workspace, and removes', async () => {
+  it('switches branch, sets workspace, and removes', async () => {
     const origin = await makeOrigin(rootDir);
+    const seed = join(rootDir, 'seed');
+    git(seed, ['branch', 'release']);
+    git(seed, ['push', 'origin', 'release']);
     const added = await addProjects('claude', rootDir, { projects: [{ repoUrl: origin, name: 'x' }] });
     const id = added.projects[0]!.id;
-    await updateProjectBranch('claude', rootDir, { id, branch: 'release' });
-    expect((await projectsView('claude', rootDir)).projects[0]!.branch).toBe('release');
+
+    await switchProjectBranch('claude', rootDir, { id, branch: 'release' });
+    const view = await projectsView('claude', rootDir);
+    expect(view.projects[0]!.branch).toBe('release');
+    expect(view.projects[0]!.status.branch).toBe('release');
 
     await setWorkspaceDir('claude', rootDir, { path: workspace });
     await removeProject('claude', rootDir, { id });
