@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BRIDGE_SYSTEM_PROMPT,
   buildBridgeSystemPrompt,
+  composeSystemPrompt,
   prefixBridgeSystemPrompt,
 } from '../../../src/agent/bridge-system-prompt';
 
@@ -69,5 +70,32 @@ describe('prefixBridgeSystemPrompt', () => {
     const prompt = prefixBridgeSystemPrompt('hello world', undefined);
     expect(prompt.startsWith(BRIDGE_SYSTEM_PROMPT)).toBe(true);
     expect(prompt.endsWith('hello world')).toBe(true);
+  });
+});
+
+describe('composeSystemPrompt role section', () => {
+  it('returns the bridge prompt unchanged when the role is missing or blank', () => {
+    expect(composeSystemPrompt(undefined)).toBe(BRIDGE_SYSTEM_PROMPT);
+    expect(composeSystemPrompt(undefined, '   ')).toBe(BRIDGE_SYSTEM_PROMPT);
+  });
+
+  it('appends a trimmed ## 角色设定 section after the bridge rules and identity', () => {
+    const out = composeSystemPrompt({ openId: 'ou_me' }, '  你是财务助手。  ');
+
+    expect(out).toContain('lark-channel-bridge 运行约定');
+    expect(out).toContain('## 角色设定');
+    expect(out).toContain('你是财务助手。');
+    expect(out).not.toContain('  你是财务助手。'); // trimmed
+    expect(out.indexOf('## 角色设定')).toBeGreaterThan(out.indexOf('## 你的身份'));
+  });
+});
+
+describe('prefixBridgeSystemPrompt role section', () => {
+  it('inserts the role before ## user_message', () => {
+    const out = prefixBridgeSystemPrompt('hello', { openId: 'ou_me' }, '你是助手');
+
+    expect(out).toContain('## 角色设定');
+    expect(out.indexOf('## 角色设定')).toBeLessThan(out.indexOf('## user_message'));
+    expect(out.endsWith('## user_message\n\nhello')).toBe(true);
   });
 });
