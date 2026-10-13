@@ -146,6 +146,7 @@ export async function discoverClaudeMcp(
       continue;
     }
     parsed += 1;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
     const servers = (config as { mcpServers?: unknown }).mcpServers;
     if (!servers || typeof servers !== 'object' || Array.isArray(servers)) continue;
     for (const [name, value] of Object.entries(servers as Record<string, unknown>)) {

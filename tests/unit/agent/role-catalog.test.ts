@@ -172,4 +172,20 @@ describe('claude MCP + skill discovery', () => {
     const section = await discoverClaudeSkills({ home, workspaceDir: workspace });
     expect(section.items).toEqual([{ name: 'real', source: '~/.claude/skills' }]);
   });
+
+  it('does not throw when a claude config parses to null', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    await writeFile(join(home, '.claude.json'), 'null', 'utf8');
+    const section = await discoverClaudeMcp({ home, workspaceDir: workspace });
+    expect(section).toEqual({ available: true, items: [] });
+  });
+
+  it('does not throw when a claude config parses to an array', async () => {
+    const home = await tempDir();
+    const workspace = await tempDir();
+    await writeFile(join(workspace, '.mcp.json'), '[1, 2]', 'utf8');
+    const section = await discoverClaudeMcp({ home, workspaceDir: workspace });
+    expect(section).toEqual({ available: true, items: [] });
+  });
 });
