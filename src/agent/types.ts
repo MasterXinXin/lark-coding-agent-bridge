@@ -65,6 +65,11 @@ export interface AgentRunOptions {
   sandbox?: CodexSandboxMode;
   permissionMode?: ClaudePermissionMode;
   /**
+   * Per-profile role (system-prompt soft constraint) from the run policy.
+   * Adapters append it via `composeSystemPrompt`; absent/blank means no role.
+   */
+  rolePrompt?: string;
+  /**
    * Grace period (ms) between SIGTERM and SIGKILL when stop() is called on
    * the returned run. Lets the agent (and any subprocess it spawned, e.g.
    * lark-cli mid-OAuth) clean up before the kernel reaps the tree.
