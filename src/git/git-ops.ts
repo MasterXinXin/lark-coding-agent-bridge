@@ -109,7 +109,8 @@ export async function listRemoteBranches(
   const names: string[] = [];
   for (const line of r.stdout.split(/\r?\n/)) {
     const m = /^[0-9a-f]+\s+refs\/heads\/(.+)$/.exec(line.trim());
-    if (m) names.push(m[1]);
+    const name = m?.[1];
+    if (name) names.push(name);
   }
   return names;
 }
