@@ -46,7 +46,12 @@ function ScopeSection({
   if (capability === "none") return null;
   return (
     <div className="space-y-2">
-      <p className="text-sm font-medium">{title}</p>
+      <p className="text-sm font-medium">
+        {title}
+        {capability === "readonly" ? (
+          <span className="text-muted-foreground"> · 只读（二期 2b 支持）</span>
+        ) : null}
+      </p>
       {!section.available ? (
         <p className="text-xs text-muted-foreground">{section.error ?? "无法读取"}（重试见上）。</p>
       ) : section.items.length === 0 ? (
@@ -61,6 +66,7 @@ function ScopeSection({
                 <span className="text-muted-foreground"> · {item.source}</span>
               </span>
               <Switch
+                aria-label={item.name}
                 checked={chosen.has(item.name)}
                 disabled={capability !== "control"}
                 onCheckedChange={() => onToggle(item.name)}
@@ -81,8 +87,31 @@ export function RoleView({ profile }: { profile: string }) {
   const [prompt, setPrompt] = useState("");
   const [mcpChosen, setMcpChosen] = useState<Set<string>>(new Set());
   const [skillsChosen, setSkillsChosen] = useState<Set<string>>(new Set());
+  const [mcpDirty, setMcpDirty] = useState(false);
+  const [skillsDirty, setSkillsDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const applyCatalog = useCallback((c: RoleCatalogView, v: RoleViewModel) => {
+    setCatalog(c);
+    setMcpChosen(initialChosen(c.mcp.items, v.mcpEnabled));
+    setSkillsChosen(initialChosen(c.skills.items, v.skillsEnabled));
+    setMcpDirty(false);
+    setSkillsDirty(false);
+  }, []);
+
+  const loadCatalog = useCallback(
+    async (v: RoleViewModel) => {
+      setCatalogError(null);
+      try {
+        applyCatalog(await apiGet<RoleCatalogView>(`/api/role/catalog?${q}`), v);
+      } catch (e) {
+        setCatalog(null);
+        setCatalogError(String((e as Error).message ?? e));
+      }
+    },
+    [q, applyCatalog],
+  );
 
   const load = useCallback(async () => {
     setError(null);
@@ -96,16 +125,8 @@ export function RoleView({ profile }: { profile: string }) {
     }
     setView(v);
     setPrompt(v.prompt);
-    try {
-      const c = await apiGet<RoleCatalogView>(`/api/role/catalog?${q}`);
-      setCatalog(c);
-      setMcpChosen(initialChosen(c.mcp.items, v.mcpEnabled));
-      setSkillsChosen(initialChosen(c.skills.items, v.skillsEnabled));
-    } catch (e) {
-      setCatalog(null);
-      setCatalogError(String((e as Error).message ?? e));
-    }
-  }, [q]);
+    await loadCatalog(v);
+  }, [q, loadCatalog]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -122,16 +143,18 @@ export function RoleView({ profile }: { profile: string }) {
     try {
       const body: Record<string, unknown> = { prompt };
       if (catalog && view) {
-        if (view.capabilities.mcp === "control" && catalog.mcp.available) {
+        if (view.capabilities.mcp === "control" && catalog.mcp.available && mcpDirty) {
           body.mcpEnabled = chosenToBody(mcpChosen, catalog.mcp.items.map((i) => i.name));
         }
-        if (view.capabilities.skills === "control" && catalog.skills.available) {
+        if (view.capabilities.skills === "control" && catalog.skills.available && skillsDirty) {
           body.skillsEnabled = chosenToBody(skillsChosen, catalog.skills.items.map((i) => i.name));
         }
       }
       const v = await apiPost<RoleViewModel>(`/api/role?${q}`, body);
       setView(v);
       setPrompt(v.prompt);
+      setMcpDirty(false);
+      setSkillsDirty(false);
       toast.success("已保存角色设定");
     } catch (e) {
       toast.error(String((e as Error).message ?? e));
@@ -181,7 +204,7 @@ export function RoleView({ profile }: { profile: string }) {
             {catalogError ? (
               <p className="text-destructive text-sm">
                 目录拉取失败：{catalogError}{" "}
-                <Button size="sm" variant="outline" onClick={() => void load()}>
+                <Button size="sm" variant="outline" onClick={() => void loadCatalog(view)}>
                   重试
                 </Button>
               </p>
@@ -192,14 +215,20 @@ export function RoleView({ profile }: { profile: string }) {
                   capability={view.capabilities.mcp}
                   section={catalog.mcp}
                   chosen={mcpChosen}
-                  onToggle={(n) => toggle(mcpChosen, setMcpChosen, n)}
+                  onToggle={(n) => {
+                    setMcpDirty(true);
+                    toggle(mcpChosen, setMcpChosen, n);
+                  }}
                 />
                 <ScopeSection
                   title="Skills"
                   capability={view.capabilities.skills}
                   section={catalog.skills}
                   chosen={skillsChosen}
-                  onToggle={(n) => toggle(skillsChosen, setSkillsChosen, n)}
+                  onToggle={(n) => {
+                    setSkillsDirty(true);
+                    toggle(skillsChosen, setSkillsChosen, n);
+                  }}
                 />
               </>
             ) : (
