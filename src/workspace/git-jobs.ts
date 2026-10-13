@@ -1,7 +1,7 @@
 import { log } from '../core/logger';
 import { createGitRunner, type GitRunner } from '../git/git-ops';
 import { HttpError } from '../ui/http';
-import { addProjects, listProjectTargets, pullProjects } from '../ui/workspace-api';
+import { addProjects, listProjectTargets, pullProjects, switchProjectBranch } from '../ui/workspace-api';
 import {
   createCodegraphHook,
   projectIndexInfo,
@@ -68,6 +68,7 @@ function pullLabel(body: unknown): string {
 type WorkspaceJobKind =
   | 'add'
   | 'pull'
+  | 'branch'
   | 'codegraph'
   | 'codegraph-init'
   | 'codegraph-sync'
@@ -183,6 +184,29 @@ export function startPullJob(
 ): { id: string } {
   return beginJob('pull', pullLabel(body), { profile, rootDir }, deps, (runner, onStep, codegraph) =>
     pullProjects(profile, rootDir, body, runner, onStep, 'manual', codegraph),
+  );
+}
+
+/** `切换分支：<branch>` label. */
+function branchLabel(body: unknown): string {
+  const branch = (body as { branch?: unknown })?.branch;
+  return typeof branch === 'string' && branch.trim() ? `切换分支：${branch.trim()}` : '切换分支';
+}
+
+/** Start a background `切换分支` job; resolves with the job id at once. */
+export function startBranchJob(
+  profile: string,
+  rootDir: string | undefined,
+  body: unknown,
+  deps: StartJobDeps = {},
+): { id: string } {
+  return beginJob(
+    'branch',
+    branchLabel(body),
+    { profile, rootDir },
+    deps,
+    (runner, onStep, codegraph) =>
+      switchProjectBranch(profile, rootDir, body, runner, onStep, codegraph),
   );
 }
 

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDefaultProfileConfig } from '../../../src/config/profile-schema';
 import { createRootConfig, saveRootConfig, writeActiveProfile } from '../../../src/config/profile-store';
 import { createGitRunner, type GitRunner } from '../../../src/git/git-ops';
-import { startAddJob, startCodegraphJob, startPullJob } from '../../../src/workspace/git-jobs';
+import { startAddJob, startBranchJob, startCodegraphJob, startPullJob } from '../../../src/workspace/git-jobs';
 import { JobRegistry, type JobSnapshot } from '../../../src/workspace/jobs';
 import type { CodegraphHook, CodegraphRunner } from '../../../src/workspace/codegraph';
 import { addProjects, type ProjectsView } from '../../../src/ui/workspace-api';
@@ -269,5 +269,33 @@ describe('git jobs', { timeout: 60_000 }, () => {
     expect(texts).toContain('Receiving objects: 100% (8/8), done.');
     expect(texts.some((t) => t.includes('12%'))).toBe(false);
     expect(texts.every((t) => !t.includes('\r'))).toBe(true);
+  });
+
+  it('runs a branch switch job and reports the new branch', async () => {
+    const origin = await makeOrigin(rootDir);
+    const seed = join(rootDir, 'seed');
+    git(seed, ['branch', 'release']);
+    git(seed, ['push', 'origin', 'release']);
+    const added = await addProjects(
+      'claude',
+      rootDir,
+      { projects: [{ repoUrl: origin, name: 'x' }] },
+      makeRecording([]),
+    );
+    const id = added.projects[0]!.id;
+
+    const registry = new JobRegistry();
+    const job = startBranchJob('claude', rootDir, { id, branch: 'release' }, {
+      registry,
+      runner: makeRecording([]),
+    });
+    expect(registry.get(job.id)!.label).toBe('切换分支：release');
+
+    const snap = await waitForJob(registry, job.id);
+    expect(snap.status).toBe('succeeded');
+    expect(snap.kind).toBe('branch');
+    expect(snap.steps.map((s) => s.name)).toEqual(['x']);
+    const result = snap.result as ProjectsView;
+    expect(result.projects[0]!.branch).toBe('release');
   });
 });
