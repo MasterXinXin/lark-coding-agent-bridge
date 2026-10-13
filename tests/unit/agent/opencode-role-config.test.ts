@@ -86,6 +86,21 @@ describe('buildOpencodeV2RoleConfig', () => {
     const out = buildOpencodeV2RoleConfig({ mcpEnabled: [], knownMcp: [], knownSkills: [] });
     expect(out.config).toBeUndefined();
   });
+
+  it('normalizes unsupported characters to `_` in the MCP action namespace', () => {
+    const out = buildOpencodeV2RoleConfig({
+      mcpEnabled: [],
+      knownMcp: ['my.server', 'weird name'],
+      knownSkills: [],
+    });
+    expect(out.deniedMcp).toEqual(['my.server', 'weird name']);
+    expect(out.config).toEqual({
+      permissions: [
+        { action: 'my_server_*', resource: '*', effect: 'deny' },
+        { action: 'weird_name_*', resource: '*', effect: 'deny' },
+      ],
+    });
+  });
 });
 
 describe('buildOpencodeV1RoleConfig', () => {

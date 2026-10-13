@@ -48,12 +48,27 @@ function deniedNames(known: readonly string[], enabled: readonly string[] | unde
   return [...new Set(known)].filter((name) => !allow.has(name));
 }
 
+/**
+ * opencode namespaces an MCP tool's permission action as `<server>_<tool>`,
+ * replacing every character outside `[A-Za-z0-9_-]` with `_` in both parts
+ * (opencode's `McpTool` id builder). A wildcard deny must use the same
+ * normalization or it silently fails to match, e.g. a server named `my.server`
+ * is actually addressed as `my_server_*`.
+ */
+function mcpActionNamespace(serverName: string): string {
+  return serverName.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 /** opencode v2: `permissions` deny rules for MCP tools and skills. */
 export function buildOpencodeV2RoleConfig(input: OpencodeRoleConfigInput): OpencodeRoleInjection {
   const deniedMcp = deniedNames(input.knownMcp, input.mcpEnabled);
   const deniedSkills = deniedNames(input.knownSkills, input.skillsEnabled);
   const permissions = [
-    ...deniedMcp.map((name) => ({ action: `${name}_*`, resource: '*', effect: 'deny' })),
+    ...deniedMcp.map((name) => ({
+      action: `${mcpActionNamespace(name)}_*`,
+      resource: '*',
+      effect: 'deny',
+    })),
     ...deniedSkills.map((id) => ({ action: 'skill', resource: id, effect: 'deny' })),
   ];
   if (permissions.length === 0) {
