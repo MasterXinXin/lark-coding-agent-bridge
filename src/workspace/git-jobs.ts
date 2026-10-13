@@ -64,13 +64,23 @@ function pullLabel(body: unknown): string {
   return typeof id === 'string' && id.trim() ? '拉取项目' : '拉取全部项目';
 }
 
+/** Job kinds surfaced to the console's progress dialog (`get`/`kindLabel`). */
+type WorkspaceJobKind =
+  | 'add'
+  | 'pull'
+  | 'codegraph'
+  | 'codegraph-init'
+  | 'codegraph-sync'
+  | 'codegraph-cli-install'
+  | 'codegraph-mcp-install';
+
 /**
  * Create a job, stream `work`'s git output into it, and return its id
  * immediately. `work` runs fire-and-forget: success finishes the job, any
  * throw fails it. Errors never reject unhandled.
  */
 function beginJob(
-  kind: 'add' | 'pull' | 'codegraph',
+  kind: WorkspaceJobKind,
   label: string,
   meta: { profile: string; rootDir?: string },
   deps: StartJobDeps,
@@ -198,6 +208,22 @@ function codegraphLabel(raw: CodegraphJobBody): string {
   }
 }
 
+/** Split the generic `codegraph` kind so the UI can label init vs sync vs install. */
+function codegraphKind(raw: CodegraphJobBody): WorkspaceJobKind {
+  switch (raw.action) {
+    case 'cli-install':
+      return 'codegraph-cli-install';
+    case 'mcp-install':
+      return 'codegraph-mcp-install';
+    case 'init':
+      return 'codegraph-init';
+    case 'sync':
+      return 'codegraph-sync';
+    default:
+      return 'codegraph';
+  }
+}
+
 async function runCodegraphAction(
   profile: string,
   rootDir: string | undefined,
@@ -255,7 +281,7 @@ export function startCodegraphJob(
 ): { id: string } {
   const raw = (body && typeof body === 'object' ? body : {}) as CodegraphJobBody;
   return beginJob(
-    'codegraph',
+    codegraphKind(raw),
     codegraphLabel(raw),
     { profile, rootDir },
     deps,

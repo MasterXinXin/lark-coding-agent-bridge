@@ -144,6 +144,7 @@ describe('codegraph routes', { timeout: 30_000 }, () => {
     const { jobId } = await json(res);
     const snap = await waitForJob(jobId);
     expect(snap.status).toBe('succeeded');
+    expect(snap.kind).toBe('codegraph-init');
     expect(initDirs).toEqual([dir]);
   });
 
@@ -156,6 +157,7 @@ describe('codegraph routes', { timeout: 30_000 }, () => {
     const { jobId } = await json(res);
     const snap = await waitForJob(jobId);
     expect(snap.status).toBe('succeeded');
+    expect(snap.kind).toBe('codegraph-cli-install');
     expect(installs).toEqual(['npm']);
   });
 
@@ -184,7 +186,9 @@ describe('codegraph routes', { timeout: 30_000 }, () => {
     const res = await post('/api/codegraph/sync?profile=claude', { id });
     expect(res.status).toBe(202);
     const { jobId } = await json(res);
-    expect((await waitForJob(jobId)).status).toBe('succeeded');
+    const snap = await waitForJob(jobId);
+    expect(snap.status).toBe('succeeded');
+    expect(snap.kind).toBe('codegraph-sync');
     expect(syncDirs).toEqual([dir]);
   });
 });

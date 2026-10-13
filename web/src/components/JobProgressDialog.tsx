@@ -51,6 +51,11 @@ function formatElapsed(ms: number): string {
 function kindLabel(kind: string): string {
   if (kind === "pull") return "拉取项目";
   if (kind === "add") return "添加项目";
+  if (kind === "codegraph-init") return "初始化索引";
+  if (kind === "codegraph-sync") return "同步索引";
+  if (kind === "codegraph-cli-install") return "安装 CodeGraph CLI";
+  if (kind === "codegraph-mcp-install") return "接入 CodeGraph MCP";
+  if (kind === "codegraph") return "CodeGraph 代码索引";
   return "后台任务";
 }
 
