@@ -7,10 +7,36 @@ This is a private fork of [zarazhangrui/lark-coding-agent-bridge](https://github
 
 Upstream history is not duplicated here; consult [the upstream repo](https://github.com/zarazhangrui/lark-coding-agent-bridge/commits/main) for changes inherited at fork time.
 
-## [Unreleased]
+## [0.4.0] - 2026-10-14
+
+The first release since 0.3.2, and the **first version published to npm** under the `@masterxinxin` scope. Upstream `lark-channel-bridge` 0.7.1 was merged in during this cycle, so the fork now carries upstream's group / bot-meeting / topic work on top of the opencode adapter.
+
+### Added
+- **Profile roles** (`src/config/profile-schema.ts`): a per-profile `role` with a prose prompt (byte-capped, UTF-8-truncated) that is composed into the bridge system prompt and forwarded to claude, codex and opencode on every run.
+- **Role MCP / skill scope, read-only discovery (phase 2a)**: a role catalog that discovers MCP servers and skills per agent — opencode config, claude config, and codex `config.toml` (table-header aware, de-duplicated, and never throwing on unparseable configs) — surfaced through `GET /api/role/catalog` and rendered as a capability matrix in the console.
+- **Role MCP / skill enforcement (phase 2b)**: per-agent MCP / skill whitelists are now enforced at run time, with opencode permission actions normalized across MCP server names. Claude definition errors fail open, and `LARK_CHANNEL_OPENCODE_NO_ROLE_RESTART` opts out of the role restart.
+- **Workspace & git projects**: a configurable workspace root, a project store, add / remove (with optional deletion of the project directory, confined to the real workspace root), a streaming git runner, clone / pull / `ensureCheckout`, and per-project branch listing and switching with rollback on failure.
+- **Host-level git accounts**: an account store and keystore, a credential-injecting git env built per account (per-call env wins over account env), provider repo listing, a connection test, and console CRUD.
+- **Background jobs**: an in-memory job registry with an operation context, a running-job ledger, child tracking, cancellation routed through operations, rollback execution, and startup reconcile / shutdown cancel.
+- **Scheduled pulls**: a pull scheduler that persists its interval clock across restarts via pull history, plus pull-history storage and API, supervisor console mode, and `/project` commands.
+- **CodeGraph integration**: CLI detection and install, index-state / stats probing, init / sync, auto-init for cloned projects, sync-on-pull, codegraph MCP wiring, and a console card.
+- **Management console (web UI)**: a Vite-built console mounted into the CLI — workspace view and directory browser, project and git-account dialogs, schedule and pull-history cards, a job progress dialog with live spinner / last-output timer / cancel, a CodeGraph card, and a role tab in the profile detail page.
+- **Interactive card (`card`) reply mode**: a stateful card header with a braille spinner, elapsed chip and heartbeat, tool colors, the agent name and start time, and a usage / metadata footer. The typing reaction is retained in card mode.
+- **opencode v1 and v2 API transports**: transport negotiation plus v2 execution terminal-event recognition.
 
 ### Changed
 - **Renamed the package to `@masterxinxin/lark-coding-agent-bridge`** and retargeted the repo / bugs / homepage URLs at `MasterXinXin/lark-coding-agent-bridge`. Install and import snippets in `README.md` / `README.zh.md` were updated to match.
+- **Merged upstream `lark-channel-bridge` 0.7.1** (group select, bot meeting support, topic / COT replies, the `@larksuite/channel` migration, model change, and codex final-reply fixes). Upstream history is still not duplicated here.
+- CodeGraph no longer auto-indexes a project on first pull; indexing is explicit or scheduled instead.
+
+### Fixed
+- Role whitelists survive a save, and only the touched scope is written; a missing role prompt is rejected and the save retries without losing edits.
+- Branch-switch and codegraph jobs register rollbacks and stay observable while running (bounded log buffer, collapsed git progress frames).
+- Git account files tolerate corruption during project add / pull, and repo-list races no longer reset the selection on account switch.
+- Stale workspace jobs are reconciled on startup instead of lingering as running.
+
+### Docs
+- Added superpowers specs and plans under `docs/superpowers/` covering workspace & git projects, global git accounts, git job progress, project branch switch, job cancellation / rollback, console CodeGraph integration, scheduled pulls, project-directory removal, the console role module (phases 1, 2a, 2b), and the Feishu run-card beautification.
 
 ## [0.3.2] - 2026-06-07
 
